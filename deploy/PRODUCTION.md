@@ -1,13 +1,15 @@
 # Production
 
 - Server: 18.142.92.2 (SSH user: ubuntu)
-- URL: https://mfecleadsync.demohub24.com/ (opens the Genesys workspace)
+- URL: https://mfecleadsync.demohub24.com/ (serves the workspace directly)
 - Code: /opt/mfecleadimport
 - Service: mfec-leadsync.service
 - Internal port: 127.0.0.1:3102
 - Environment: /etc/mfec-leadsync.env
 - Data: /var/lib/mfec-leadsync/data
 - Backups: /var/backups/mfec-leadsync
+
+The workspace uses root paths such as `/import-leads`, `/regions`, `/scheduler`, `/campaigns`, and `/settings`. Previous `/genesys` page URLs permanently redirect to the corresponding root path, preserving query parameters. Genesys API URLs remain under `/api/admin/genesys`.
 
 The initial migration copies local source records, Genesys configuration, and the administrator password hash from the legacy application. APP_SECRET is preserved to decrypt the existing Genesys Client Secret; SESSION_SECRET is unique to this service. No sessions are copied. Runtime records, secrets, and credentials are excluded from Git.
 

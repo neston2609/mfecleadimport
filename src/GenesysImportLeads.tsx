@@ -532,7 +532,7 @@ export function GenesysImportLeads({ config }: { config: GenesysConfig }) {
         <div className="lead-import-readiness">
           Configure and enable the integration, select a Contact List, and
           validate its schema before loading leads.
-          <a href="/genesys">Open Integration</a>
+          <a href="/">Open Integration</a>
         </div>
       )}
 
@@ -609,7 +609,7 @@ export function GenesysImportLeads({ config }: { config: GenesysConfig }) {
             <Users size={25} />
             <strong>No campaigns available</strong>
             <span>Create a campaign in Insurance Management first.</span>
-            <a className="secondary" href="/genesys/campaigns">
+            <a className="secondary" href="/campaigns">
               Open Campaigns
             </a>
           </div>

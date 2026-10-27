@@ -14,15 +14,15 @@ npm run build
 npm start
 ```
 
-เปิด http://localhost:3002/genesys
+เปิด http://localhost:3002/
 
-สำหรับพัฒนา เปิดสอง terminal: `npm run dev:server` และ `npm run dev:client` แล้วเข้า http://localhost:5175/genesys ถ้าเปลี่ยน PORT ให้เปลี่ยน API_PROXY_TARGET ใน .env ตามด้วย
+สำหรับพัฒนา เปิดสอง terminal: `npm run dev:server` และ `npm run dev:client` แล้วเข้า http://localhost:5175/ ถ้าเปลี่ยน PORT ให้เปลี่ยน API_PROXY_TARGET ใน .env ตามด้วย
 
 ## ล็อกอินและข้อมูล
 
 ในการพัฒนาค่าเริ่มต้นคือ admin / ChangeMe123! สำหรับ production ต้องตั้ง APP_SECRET, SESSION_SECRET และ ADMIN_PASSWORD ที่รัดกุมและแยกจากระบบอื่น Bootstrap password ถูกบันทึกเป็น hash ใน data/.auth/admin.json หลังเริ่มใช้งานครั้งแรก จากนั้นลบ ADMIN_PASSWORD ออกจาก .env และเปลี่ยนรหัสผ่านผ่านหน้า Settings ได้ Session cookie ใช้ชื่อ genesys.sid และข้อมูล session อยู่ใน data/.sessions/ เฉพาะแอปนี้
 
-Routes: /genesys, /genesys/import-leads, /genesys/regions, /genesys/scheduler, /genesys/campaigns, /genesys/customers, /genesys/products, /genesys/policies, /genesys/settings
+Routes: /, /import-leads, /regions, /scheduler, /campaigns, /customers, /products, /policies, /settings
 
 ตั้งค่า OAuth และ Contact List ใน Integration, ทดสอบการเชื่อมต่อและ Validate Schema แล้วเลือก Source campaigns ใน Import Lead Contact เพื่อ preview และส่ง lead ไป Genesys เลือก Source campaigns / Export เพื่อสร้างแคมเปญและดาวน์โหลด CSV สามารถจัดการข้อมูลต้นทางลูกค้า สินค้า และกรมธรรม์ได้ในแอปนี้เอง Scheduler ทำงานกับแคมเปญและข้อมูลภายในแอปนี้
 

@@ -164,14 +164,8 @@ const genesysNav = [
   { key: "scheduler", label: "Scheduler", icon: Clock3 },
 ];
 
-const portalRoot = (portal: Portal) => "/genesys";
-
-const isPathFor = (path: string, root: string) =>
-  path === root || path.startsWith(`${root}/`);
-
 export function Root() {
   const portal: Portal = "genesys";
-  const root = portalRoot(portal);
   const path = window.location.pathname;
   const [session, setSession] = useState<{
     authenticated: boolean;
@@ -185,26 +179,20 @@ export function Root() {
       .then(setSession)
       .catch(() => setSession({ authenticated: false, username: "" }));
   }, []);
-  if (path === "/") {
-    window.location.replace(root);
-    return null;
-  }
-  if (!isPathFor(path, root))
-    return <div className="empty-state">Page not found</div>;
   if (!session) return <div className="admin-loading">Loading...</div>;
   if (!session.authenticated)
     return (
       <Login
         portal={portal}
         returnPath={
-          path === root + "/login"
-            ? root
+          path === "/login"
+            ? "/"
             : path + window.location.search + window.location.hash
         }
         onLogin={setSession}
       />
     );
-  if (path === root + "/login") window.history.replaceState({}, "", root);
+  if (path === "/login") window.history.replaceState({}, "", "/");
   return <AdminPortal username={session.username} portal={portal} />;
 }
 
@@ -301,9 +289,8 @@ function AdminPortal({
   username: string;
   portal: Portal;
 }) {
-  const section = window.location.pathname.split("/")[2] || "integration";
+  const section = window.location.pathname.split("/")[1] || "integration";
   const [menuOpen, setMenuOpen] = useState(false);
-  const root = portalRoot(portal);
   const navigation = [
     ...genesysNav,
     { key: "campaigns", label: "Source campaigns / Export", icon: Filter },
@@ -317,7 +304,7 @@ function AdminPortal({
       method: "POST",
       body: JSON.stringify({ portal }),
     });
-    window.location.href = root + "/login";
+    window.location.href = "/login";
   }
   return (
     <div className="admin-shell genesys-portal">
@@ -335,8 +322,7 @@ function AdminPortal({
               key={key}
               className={section === key ? "active" : ""}
               href={
-                root +
-                (["dashboard", "integration"].includes(key) ? "" : "/" + key)
+                ["dashboard", "integration"].includes(key) ? "/" : "/" + key
               }
             >
               <Icon size={18} />
@@ -592,11 +578,7 @@ function Dashboard() {
               ["Renewed", kpis?.renewed, "renewals"],
               ["New inquiries", kpis?.newInquiries, "inquiries"],
             ].map(([label, value, link]) => (
-              <a
-                className="kpi-tile"
-                key={String(label)}
-                href={`/genesys/${link}`}
-              >
+              <a className="kpi-tile" key={String(label)} href={`/${link}`}>
                 <span>{label}</span>
                 <strong>
                   {typeof value === "number"
@@ -611,7 +593,7 @@ function Dashboard() {
             <div className="admin-panel">
               <div className="panel-head">
                 <h2>Policies nearing expiry</h2>
-                <a href="/genesys/renewals">
+                <a href="/renewals">
                   View records <ArrowRight size={15} />
                 </a>
               </div>
@@ -674,7 +656,7 @@ function Dashboard() {
             <div className="admin-panel">
               <div className="panel-head">
                 <h2>Genesys Sync</h2>
-                <a href="/genesys">
+                <a href="/">
                   Configure integration <ArrowRight size={15} />
                 </a>
               </div>
@@ -708,7 +690,7 @@ const blankCustomer = (): Customer => ({
 });
 
 function Customers() {
-  const id = window.location.pathname.split("/")[3];
+  const id = window.location.pathname.split("/")[2];
   if (id) return <Customer360 id={id} />;
   return <CustomerList />;
 }
@@ -802,7 +784,7 @@ function CustomerList() {
               <tr key={item.customerId}>
                 <td>
                   <a
-                    href={`/genesys/customers/${item.customerId}`}
+                    href={`/customers/${item.customerId}`}
                     className="table-link"
                   >
                     {item.customerId}
@@ -1012,7 +994,7 @@ function Customer360({ id }: { id: string }) {
   }, [id]);
   return (
     <>
-      <a className="admin-back" href="/genesys/customers">
+      <a className="admin-back" href="/customers">
         <ArrowLeft size={16} /> Back to customers
       </a>
       <PageHead
@@ -1066,7 +1048,7 @@ function Customer360({ id }: { id: string }) {
           <div className="admin-panel">
             <div className="panel-head">
               <h2>Policies ({data.policies.length})</h2>
-              <a href="/genesys/policies">View all</a>
+              <a href="/policies">View all</a>
             </div>
             <div className="admin-table-wrap">
               <table className="admin-table">
@@ -1086,7 +1068,7 @@ function Customer360({ id }: { id: string }) {
                       <td>
                         <a
                           className="table-link"
-                          href={`/genesys/policies/${item.policyId}`}
+                          href={`/policies/${item.policyId}`}
                         >
                           {item.policyNumber}
                         </a>
@@ -1648,7 +1630,7 @@ function blankPolicy(): Policy {
 }
 
 function Policies({ renewal = false }: { renewal?: boolean }) {
-  const id = window.location.pathname.split("/")[3];
+  const id = window.location.pathname.split("/")[2];
   if (id && !renewal) return <PolicyDetail id={id} />;
   return <PolicyList renewal={renewal} />;
 }
@@ -1968,17 +1950,14 @@ function PolicyList({ renewal }: { renewal: boolean }) {
                   </td>
                 )}
                 <td>
-                  <a
-                    className="table-link"
-                    href={`/genesys/policies/${item.policyId}`}
-                  >
+                  <a className="table-link" href={`/policies/${item.policyId}`}>
                     {item.policyNumber}
                   </a>
                 </td>
                 <td>
                   {item.customer ? (
                     <a
-                      href={`/genesys/customers/${item.customerId}`}
+                      href={`/customers/${item.customerId}`}
                       className="table-link"
                     >
                       {item.customer.firstName} {item.customer.lastName}
@@ -2490,7 +2469,7 @@ function PolicyDetail({ id }: { id: string }) {
   }
   return (
     <>
-      <a className="admin-back" href="/genesys/policies">
+      <a className="admin-back" href="/policies">
         <ArrowLeft size={16} /> Back to policies
       </a>
       <PageHead
@@ -3386,7 +3365,7 @@ function PasswordSettings() {
           confirmPassword,
         }),
       });
-      window.location.href = "/genesys/login?passwordChanged=1";
+      window.location.href = "/login?passwordChanged=1";
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Could not change password",
@@ -3485,17 +3464,14 @@ function GlobalSearch() {
         <div className="search-popover">
           <b>Customers</b>
           {result.customers.map((item) => (
-            <a
-              key={item.customerId}
-              href={"/genesys/customers/" + item.customerId}
-            >
+            <a key={item.customerId} href={"/customers/" + item.customerId}>
               {item.firstName} {item.lastName}
               <small>{item.customerId}</small>
             </a>
           ))}
           <b>Policies</b>
           {result.policies.map((item) => (
-            <a key={item.policyId} href={"/genesys/policies/" + item.policyId}>
+            <a key={item.policyId} href={"/policies/" + item.policyId}>
               {item.policyNumber}
               <small>{item.vehicle.licensePlate}</small>
             </a>

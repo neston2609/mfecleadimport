@@ -96,8 +96,11 @@ app.use("/api", (_request, response) =>
 app.use(["/manage"], (_request, response) => {
   response.status(404).send("Page not found");
 });
-app.get("/", (_request, response) => {
-  response.redirect(302, "/genesys");
+app.use("/genesys", (request, response) => {
+  const target = request.originalUrl
+    .replace(/^\/genesys(?=\/|\?|$)/i, "")
+    .replace(/^\/+/, "/");
+  response.redirect(308, target.startsWith("/") ? target : `/${target}`);
 });
 
 if (process.env.NODE_ENV === "production") {

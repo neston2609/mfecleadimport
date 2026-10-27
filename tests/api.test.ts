@@ -95,7 +95,21 @@ test(
         (await (await request("/api/health")).json()).service,
         "mfec-lead-import-export",
       );
-      assert.equal((await request("/")).headers.get("location"), "/genesys");
+      const homepage = await request("/");
+      assert.equal(homepage.status, 200);
+      assert.equal(homepage.headers.get("location"), null);
+      assert.match(await homepage.text(), /MFEC Lead Import\/Export/);
+      for (const [oldPath, newPath] of [
+        ["/genesys", "/"],
+        ["/genesys/", "/"],
+        ["/genesys/import-leads?campaign=demo", "/import-leads?campaign=demo"],
+        ["/genesys/customers/CUST00001", "/customers/CUST00001"],
+        ["/genesys/login?passwordChanged=1", "/login?passwordChanged=1"],
+      ]) {
+        const legacy = await request(oldPath);
+        assert.equal(legacy.status, 308, oldPath);
+        assert.equal(legacy.headers.get("location"), newPath, oldPath);
+      }
       assert.equal((await request("/manage")).status, 404);
       assert.equal((await request("/api/admin/customers")).status, 401);
       assert.equal(
@@ -287,10 +301,16 @@ test(
         401,
       );
       for (const url of [
-        "/genesys",
-        "/genesys/customers",
-        "/genesys/campaigns",
-        "/genesys/settings",
+        "/",
+        "/login",
+        "/import-leads",
+        "/regions",
+        "/scheduler",
+        "/customers",
+        "/customers/CUST00001",
+        "/policies/POL00001",
+        "/campaigns",
+        "/settings",
       ])
         assert.equal((await request(url)).status, 200, url);
     } finally {
