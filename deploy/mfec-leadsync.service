@@ -1,0 +1,23 @@
+[Unit]
+Description=MFEC Lead Import Export
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mfecleadimport
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/mfec-leadsync.env
+ExecStart=/usr/bin/node --import tsx server/index.ts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mfec-leadsync /var/backups/mfec-leadsync
+
+[Install]
+WantedBy=multi-user.target
