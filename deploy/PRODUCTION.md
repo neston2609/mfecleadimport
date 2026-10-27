@@ -1,5 +1,6 @@
 # Production
 
+- Server: 18.142.92.2 (SSH user: ubuntu)
 - URL: https://mfecleadsync.demohub24.com/ (opens the Genesys workspace)
 - Code: /opt/mfecleadimport
 - Service: mfec-leadsync.service
