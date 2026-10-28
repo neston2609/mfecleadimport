@@ -1,5 +1,12 @@
 import {
   ArrowDownToLine,
+  Home,
+  Link2,
+  Network,
+  MapPin,
+  CalendarDays,
+  SlidersHorizontal,
+  ChevronDown,
   ArrowLeft,
   ArrowRight,
   Clock3,
@@ -49,6 +56,8 @@ import type {
 
 import { App as GenesysSettings } from "./App";
 import { PipelineWorkspace } from "./PipelineWorkspace";
+import { LeadSyncLogin as Login } from "./LeadSyncLogin";
+import { LeadSyncHeader } from "./LeadSyncChrome";
 
 type Page<T> = { items: T[]; total: number; page: number; pageSize: number };
 
@@ -162,33 +171,37 @@ const navigationGroups = [
   {
     label: "",
     items: [
-      { key: "overview", label: "Overview", icon: Globe2 },
-      { key: "templates", label: "Contact List Template", icon: FileText },
+      { key: "overview", label: "Dashboard", icon: Home },
+      { key: "templates", label: "Contact List Templates", icon: FileText },
     ],
   },
   {
     label: "Source Configuration",
     items: [
-      { key: "sources", label: "Source Integration", icon: DatabaseBackup },
-      { key: "mappings", label: "Source Mapping", icon: Filter },
+      { key: "sources", label: "Source Integration", icon: Link2 },
+      { key: "mappings", label: "Source Mapping", icon: Network },
     ],
   },
   {
     label: "",
-    items: [{ key: "leads", label: "Lead Configuration", icon: Users }],
+    items: [{ key: "leads", label: "Lead Configuration", icon: Settings }],
   },
   {
     label: "Genesys Configuration",
     items: [
-      { key: "integration", label: "Integration settings", icon: ShieldCheck },
-      { key: "regions", label: "Region management", icon: Globe2 },
+      {
+        key: "integration",
+        label: "Integration Settings",
+        icon: SlidersHorizontal,
+      },
+      { key: "regions", label: "Region Management", icon: MapPin },
     ],
   },
   {
     label: "Lead Importer",
     items: [
       { key: "manual-import", label: "Manual Import", icon: CloudUpload },
-      { key: "schedule-import", label: "Schedule Import", icon: Clock3 },
+      { key: "schedule-import", label: "Schedule Import", icon: CalendarDays },
     ],
   },
   {
@@ -212,7 +225,7 @@ export function Root() {
     username: string;
   } | null>(null);
   useEffect(() => {
-    document.title = "MFEC Lead Import/Export";
+    document.title = "MFEC LeadSync";
     api<{ authenticated: boolean; username: string }>(
       `${base}/auth/session?portal=${portal}`,
     )
@@ -234,92 +247,6 @@ export function Root() {
     );
   if (path === "/login") window.history.replaceState({}, "", "/");
   return <AdminPortal username={session.username} portal={portal} />;
-}
-
-function Login({
-  portal,
-  returnPath,
-  onLogin,
-}: {
-  portal: Portal;
-  returnPath: string;
-  onLogin: (value: { authenticated: boolean; username: string }) => void;
-}) {
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const passwordChanged = new URLSearchParams(window.location.search).has(
-    "passwordChanged",
-  );
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<{ authenticated: boolean; username: string }>(
-        base + "/auth/login",
-        {
-          method: "POST",
-          body: JSON.stringify({ username, password, portal }),
-        },
-      );
-      window.history.replaceState({}, "", returnPath);
-      onLogin(result);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Sign in failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="admin-login genesys-login">
-      <div className="login-brand">
-        <span>
-          <ShieldCheck size={27} />
-        </span>
-        <b>MFEC Lead Import/Export</b>
-        <small>GENESYS OPERATIONS</small>
-      </div>
-      <form onSubmit={submit}>
-        <h1>Sign in</h1>
-        <p>Manage Genesys integration, lead imports, exports, and schedules</p>
-        {passwordChanged && (
-          <div className="admin-success" role="status">
-            Password updated. Sign in with your new password.
-          </div>
-        )}
-        <label>
-          Username
-          <input
-            autoComplete="username"
-            required
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-        </label>
-        <label>
-          Password
-          <input
-            autoComplete="current-password"
-            required
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-        {error && (
-          <div className="admin-error" role="alert">
-            {error}
-          </div>
-        )}
-        <button className="admin-primary" disabled={busy}>
-          {busy ? "Signing in..." : "Sign in"}
-          <ArrowRight size={18} />
-        </button>
-      </form>
-    </div>
-  );
 }
 
 function AdminPortal({
@@ -351,33 +278,72 @@ function AdminPortal({
     window.location.href = "/login";
   }
   return (
-    <div className="admin-shell genesys-portal">
+    <div className="admin-shell genesys-portal leadsync-theme">
+      <LeadSyncHeader
+        username={username}
+        onMenu={() => setMenuOpen(!menuOpen)}
+        onLogout={logout}
+      />
+      {menuOpen && (
+        <button
+          className="ls-nav-backdrop"
+          aria-label="Close navigation"
+          onClick={() => setMenuOpen(false)}
+        />
+      )}
       <aside className={menuOpen ? "admin-sidebar open" : "admin-sidebar"}>
-        <div className="admin-sidebar-brand">
-          <span>
-            <ShieldCheck size={21} />
-          </span>
-          <b>MFEC Lead Import/Export</b>
-          <small>GENESYS OPERATIONS</small>
-        </div>
-        <nav>
-          {navigationGroups.map((group, index) => (
-            <div className="pipe-nav-group" key={index}>
-              {group.label && (
-                <span className="pipe-nav-label">{group.label}</span>
-              )}
-              {group.items.map(({ key, label, icon: Icon }) => (
-                <a
-                  key={key}
-                  className={section === key ? "active" : ""}
-                  href={key === "overview" ? "/" : "/" + key}
-                >
-                  <Icon size={17} />
-                  {label}
-                </a>
-              ))}
-            </div>
-          ))}
+        <button
+          className="ls-nav-close"
+          aria-label="Close navigation"
+          onClick={() => setMenuOpen(false)}
+        >
+          <X size={21} />
+        </button>
+        <nav aria-label="Main navigation">
+          {navigationGroups.map((group, index) =>
+            group.label ? (
+              <details className="ls-nav-section" key={index} open>
+                <summary>
+                  {group.label === "Source Configuration" ? (
+                    <DatabaseBackup size={19} />
+                  ) : group.label === "Lead Importer" ? (
+                    <Search size={19} />
+                  ) : (
+                    <Network size={19} />
+                  )}
+                  <span>{group.label}</span>
+                  <ChevronDown size={15} />
+                </summary>
+                <div className="ls-nav-children">
+                  {group.items.map(({ key, label, icon: Icon }) => (
+                    <a
+                      key={key}
+                      className={section === key ? "active" : ""}
+                      aria-current={section === key ? "page" : undefined}
+                      href={"/" + key}
+                    >
+                      <Icon size={19} />
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              </details>
+            ) : (
+              <div className="ls-nav-section" key={index}>
+                {group.items.map(({ key, label, icon: Icon }) => (
+                  <a
+                    key={key}
+                    className={section === key ? "active" : ""}
+                    aria-current={section === key ? "page" : undefined}
+                    href={key === "overview" ? "/" : "/" + key}
+                  >
+                    <Icon size={19} />
+                    {label}
+                  </a>
+                ))}
+              </div>
+            ),
+          )}
           <details className="pipe-legacy-nav">
             <summary>Legacy sources</summary>
             {legacyNavigation.map(({ key, label }) => (
@@ -393,32 +359,25 @@ function AdminPortal({
         </nav>
         <div className="sidebar-bottom">
           <button onClick={logout}>
-            <LogOut size={17} /> Sign out
+            <LogOut size={17} />
+            Sign out
           </button>
         </div>
       </aside>
       <div className="admin-main">
-        <header className="admin-topbar">
-          <button
-            className="admin-menu-button"
-            aria-label="Menu"
-            onClick={() => setMenuOpen(!menuOpen)}
-          >
-            <Menu size={20} />
-          </button>
-          <div className="admin-breadcrumb">
-            MFEC Lead Import/Export <ChevronRight size={14} />
-            <b>
-              {navigation.find((item) => item.key === section)?.label ||
-                "Page not found"}
-            </b>
-          </div>
-          <GlobalSearch />
-          <div className="admin-user">
-            <span>{username.slice(0, 1).toUpperCase()}</span>
-            {username}
-          </div>
-        </header>
+        <div className="ls-page-breadcrumb">
+          <a href="/">Home</a>
+          <ChevronRight size={12} />
+          {["manual-import", "schedule-import"].includes(section) && (
+            <>
+              <span>Lead Importer</span>
+              <ChevronRight size={12} />
+            </>
+          )}
+          <span>
+            {navigation.find((item) => item.key === section)?.label || "Page"}
+          </span>
+        </div>
         <main className="admin-content">
           {[
             "overview",

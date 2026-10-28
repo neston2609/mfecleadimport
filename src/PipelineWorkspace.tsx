@@ -2,11 +2,17 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import {
   ArrowRight,
+  Upload,
+  Eye,
+  Search,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Database,
   FileUp,
@@ -32,6 +38,7 @@ import type {
   SourceData,
 } from "../server/domain/pipeline-types";
 import "./pipeline.css";
+import { LeadSyncInsights, LeadSyncMetrics } from "./LeadSyncInsights";
 
 const endpoint = "/api/admin/pipeline";
 type SourceView = Omit<SourceIntegration, "secretEncrypted"> & {
@@ -71,7 +78,7 @@ type DraftSource = {
 };
 const titles: Record<Page, [string, string]> = {
   overview: [
-    "Lead workspace",
+    "LeadSync Dashboard",
     "Connect your sources, map your data, and deliver leads to Genesys.",
   ],
   templates: [
@@ -91,8 +98,8 @@ const titles: Record<Page, [string, string]> = {
     "Build reusable lead selections with field values, numbers, and date offsets.",
   ],
   "manual-import": [
-    "Manual Import",
-    "Preview a Lead Configuration, then import selected records or all eligible leads.",
+    "Manual Lead Import",
+    "Preview, validate, and import leads to Genesys Cloud",
   ],
   "schedule-import": [
     "Schedule Import",
@@ -117,7 +124,15 @@ const FeedbackContext = createContext({
 function Pill({ value }: { value: string }) {
   return (
     <span className={`pipe-pill ${value.toLowerCase().replaceAll("_", "-")}`}>
-      {value.replaceAll("_", " ")}
+      {(
+        {
+          ELIGIBLE: "Ready to Import",
+          UPDATE_AVAILABLE: "Ready to update",
+          SYNCED: "Already synced",
+          INVALID: "Invalid",
+          DNC: "Do not call",
+        } as Record<string, string>
+      )[value] || value.replaceAll("_", " ")}
     </span>
   );
 }
@@ -131,9 +146,44 @@ function Modal({
   onClose: () => void;
 }) {
   const feedback = useContext(FeedbackContext);
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const selector =
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]';
+    dialog?.querySelector<HTMLElement>(selector)?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRef.current();
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const items = Array.from(
+        dialog.querySelectorAll<HTMLElement>(selector),
+      ).filter((item) => item.getClientRects().length);
+      const first = items[0],
+        last = items.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      previous?.focus();
+    };
+  }, []);
   return (
     <div className="admin-modal-backdrop">
       <section
+        ref={dialogRef}
         className="admin-modal pipe-modal"
         role="dialog"
         aria-modal="true"
@@ -525,7 +575,13 @@ export function PipelineWorkspace({ page }: { page: Page }) {
       <div className="pipeline-workspace">
         <header className="admin-page-head">
           <div>
-            <span>MFEC LEAD WORKSPACE</span>
+            <span>
+              {["manual-import", "schedule-import"].includes(page)
+                ? "LEAD IMPORTER"
+                : page === "overview"
+                  ? "YOUR DATA. YOUR OPPORTUNITIES."
+                  : "MFEC LEADSYNC"}
+            </span>
             <h1>{title}</h1>
             <p>{description}</p>
           </div>
@@ -2258,6 +2314,11 @@ function ManualImporter({
   onError: (error: string) => void;
   refresh: () => Promise<void>;
 }) {
+  const [search, setSearch] = useState("");
+  const [allFields, setAllFields] = useState(false);
+  const [confirmation, setConfirmation] = useState<{ ids?: string[] } | null>(
+    null,
+  );
   const activeImport = data.jobs.find((item) => item.status === "RUNNING");
   const [leadId, setLeadId] = useState(activeImport?.leadId || ""),
     [listId, setListId] = useState(activeImport?.contactListId || ""),
@@ -2326,14 +2387,12 @@ function ManualImporter({
     if (template?.contactListId) setListId(template.contactListId);
   }
   const active = starting || job?.status === "RUNNING";
-  async function start(ids?: string[]) {
+  async function start(ids?: string[], confirmed = false) {
     if (!preview || !listId) return;
-    if (
-      !window.confirm(
-        `Import ${ids?.length ?? preview.summary.eligible} records into the selected Genesys Contact List?`,
-      )
-    )
+    if (!confirmed) {
+      setConfirmation({ ids });
       return;
+    }
     setStarting(true);
     onError("");
     try {
@@ -2355,31 +2414,65 @@ function ManualImporter({
       setStarting(false);
     }
   }
-  const pageRows = preview?.rows.slice((page - 1) * 50, page * 50) || [];
+  const filteredRows =
+    preview?.rows.filter(
+      (row) =>
+        !search ||
+        [row.sourceKey, row.status, ...Object.values(row.data)].some((value) =>
+          String(value).toLowerCase().includes(search.toLowerCase()),
+        ),
+    ) || [];
+  const pageRows = filteredRows.slice((page - 1) * 5, page * 5);
   const pageEligible = pageRows.filter((row) => canImport(row.status));
+  const preferred =
+    preview?.fields.filter((field) =>
+      /^(customer_?id|first_?name|last_?name|full_?name|name|phone|mobile|expiry_?date|expiry|expires|amount)$/i.test(
+        field,
+      ),
+    ) || [];
+  const visibleFields = allFields
+    ? preview?.fields || []
+    : (preferred.length ? preferred : preview?.fields || []).slice(0, 5);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / 5));
   return (
-    <>
-      <section className="admin-panel">
-        <div className="pipe-field-grid">
-          <label>
-            Lead Configuration
-            <select
-              value={leadId}
-              disabled={active}
-              onChange={(event) => selectLead(event.target.value)}
-            >
-              <option value="">Select a Lead Configuration</option>
-              {data.leads.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Genesys Contact List
-            <div className="pipe-inline">
+    <div className="ls-import-layout">
+      <div className="ls-import-main">
+        <LeadSyncMetrics data={data} eligible={preview?.summary.eligible} />
+        <section className="admin-panel ls-manual-card">
+          <div className="ls-manual-card-heading">
+            <Upload size={31} />
+            <div>
+              <h2>Manual Lead Import</h2>
+              <p>
+                Select lead configuration and preview the data before importing
+                to Genesys Cloud
+              </p>
+            </div>
+          </div>
+          <div className="pipe-field-grid ls-import-selects">
+            <label>
+              Lead Configuration <em>*</em>
               <select
+                aria-label="Lead Configuration"
+                value={leadId}
+                disabled={active}
+                onChange={(event) => {
+                  selectLead(event.target.value);
+                  setSearch("");
+                }}
+              >
+                <option value="">Select a Lead Configuration</option>
+                {data.leads.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Genesys Contact List <em>*</em>
+              <select
+                aria-label="Genesys Contact List"
                 value={listId}
                 disabled={active}
                 onChange={(event) => setListId(event.target.value)}
@@ -2394,139 +2487,106 @@ function ManualImporter({
                   </option>
                 ))}
               </select>
-              <button
-                className="admin-secondary"
-                disabled={active}
-                onClick={() => void loadLists()}
-              >
-                <RefreshCw size={15} /> Load lists
-              </button>
-              <button
-                className="admin-secondary danger-link"
-                disabled={active || !listId}
-                onClick={() => {
-                  if (
-                    window.prompt(
-                      "This removes ALL contacts from the selected Genesys Contact List. Type CLEAR to continue.",
-                    ) !== "CLEAR"
-                  )
-                    return;
-                  setStarting(true);
-                  void api<{ message: string }>(
-                    `${endpoint}/contact-lists/${listId}/clear`,
-                    {
-                      method: "POST",
-                      body: JSON.stringify({ confirmation: "CLEAR" }),
-                    },
-                  )
-                    .then(() => setReload((value) => value + 1))
-                    .catch((error) => onError(error.message))
-                    .finally(() => setStarting(false));
-                }}
-              >
-                Clear list
-              </button>
-            </div>
-          </label>
-        </div>
-        <p className="pipe-muted">
-          Choose a lead to load its current data. The selected destination is
-          used for this import only; it does not change global Genesys settings.
-        </p>
-      </section>
-      {job && (
-        <section className="admin-panel pipe-import-progress">
-          <div className="pipe-section-head">
-            <h3>Import progress</h3>
-            <Pill value={job.status} />
+            </label>
           </div>
-          <progress max={Math.max(1, job.total)} value={job.processed} />
-          <p>{job.message}</p>
-          <small>
-            {job.created} created · {job.updated} updated · {job.skipped}{" "}
-            skipped · {job.failed} failed
-          </small>
-          {job.results.some((result) => result.status === "FAILED") && (
-            <details>
-              <summary>Failed records</summary>
-              {job.results
-                .filter((result) => result.status === "FAILED")
-                .map((result, index) => (
-                  <p key={index}>
-                    <b>{result.sourceKey}</b> — {result.message}
-                  </p>
-                ))}
-            </details>
+          <div className="ls-import-actions">
+            <button
+              className="admin-secondary ls-preview-button"
+              disabled={active || !leadId || loading}
+              onClick={() => setReload((value) => value + 1)}
+            >
+              <Eye size={17} />
+              Preview Leads
+            </button>
+            <button
+              className="admin-primary"
+              disabled={
+                active || !listId || !selected.length || preview?.truncated
+              }
+              onClick={() => void start(selected)}
+            >
+              <Upload size={17} />
+              Import Selected ({selected.length})
+            </button>
+            <button
+              className="admin-secondary ls-outline-primary"
+              disabled={
+                active ||
+                !listId ||
+                !preview?.summary.eligible ||
+                preview?.truncated
+              }
+              onClick={() => void start()}
+            >
+              <Upload size={17} />
+              Import All
+            </button>
+          </div>
+          {job && (
+            <section className="admin-panel pipe-import-progress">
+              <div className="pipe-section-head">
+                <h3>Import progress</h3>
+                <Pill value={job.status} />
+              </div>
+              <progress max={Math.max(1, job.total)} value={job.processed} />
+              <p>{job.message}</p>
+              <small>
+                {job.created} created · {job.updated} updated · {job.skipped}{" "}
+                skipped · {job.failed} failed
+              </small>
+              {job.results.some((result) => result.status === "FAILED") && (
+                <details>
+                  <summary>Failed records</summary>
+                  {job.results
+                    .filter((result) => result.status === "FAILED")
+                    .map((result, index) => (
+                      <p key={index}>
+                        <b>{result.sourceKey}</b> — {result.message}
+                      </p>
+                    ))}
+                </details>
+              )}
+            </section>
           )}
-        </section>
-      )}
-      {loading ? (
-        <div className="admin-loading">
-          <Loader2 size={20} className="spin" /> Loading source data…
-        </div>
-      ) : !preview ? (
-        <section className="admin-panel">
-          <Empty>
-            {data.leads.length
-              ? "Select a Lead Configuration to preview your records."
-              : "Create a Contact List Template, Source Mapping, and Lead Configuration first."}
-          </Empty>
-        </section>
-      ) : (
-        <>
-          <PreviewStats preview={preview} />
-          {preview.truncated && (
+
+          <div className="ls-preview-heading" id="lead-preview">
+            <h3>
+              Preview Data{" "}
+              <span>({preview?.total.toLocaleString() || 0} records)</span>
+            </h3>
+            <div className="ls-table-search">
+              <Search size={16} />
+              <input
+                aria-label="Search preview results"
+                placeholder="Search in results…"
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+          </div>
+          {preview?.truncated && (
             <div className="pipe-warning">
-              The source limit was reached. Imports are blocked until the source
-              query is narrowed.
+              The source limit was reached. Narrow your source query before
+              importing.
             </div>
           )}
-          <section className="admin-panel">
-            <div className="pipe-section-head">
-              <div>
-                <h3>{preview.lead.name}</h3>
-                <small className="pipe-muted">
-                  {preview.mapping.name} → {preview.template.name}
-                </small>
-              </div>
-              <div className="pipe-actions">
-                <button
-                  className="admin-secondary"
-                  disabled={active}
-                  onClick={() => setReload((value) => value + 1)}
-                >
-                  <RefreshCw size={15} /> Refresh
-                </button>
-                <a
-                  className="admin-secondary"
-                  href={`${endpoint}/leads/${leadId}/export`}
-                >
-                  Export CSV
-                </a>
-                <button
-                  className="admin-secondary"
-                  disabled={
-                    active || !listId || !selected.length || preview.truncated
-                  }
-                  onClick={() => void start(selected)}
-                >
-                  Import selected ({selected.length})
-                </button>
-                <button
-                  className="admin-primary"
-                  disabled={
-                    active ||
-                    !listId ||
-                    !preview.summary.eligible ||
-                    preview.truncated
-                  }
-                  onClick={() => void start()}
-                >
-                  Import all eligible ({preview.summary.eligible})
-                </button>
-              </div>
+          {loading ? (
+            <div className="admin-loading">
+              <Loader2 size={20} className="spin" />
+              Loading source data…
             </div>
+          ) : !preview ? (
+            <Empty>
+              {data.leads.length
+                ? "Select a Lead Configuration to preview your records."
+                : "Create a template, source mapping and lead configuration to get started."}
+            </Empty>
+          ) : (
             <div className="pipe-table-scroll">
+              {" "}
               <table className="admin-table">
                 <thead>
                   <tr>
@@ -2558,10 +2618,11 @@ function ManualImporter({
                         }
                       />
                     </th>
-                    <th>Record key / Status</th>
-                    {preview.fields.map((field) => (
+                    <th>Record key</th>
+                    {visibleFields.map((field) => (
                       <th key={field}>{field}</th>
                     ))}
+                    <th>Status</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -2585,16 +2646,19 @@ function ManualImporter({
                       </td>
                       <td>
                         <b>{row.sourceKey || "Empty key"}</b>
-                        <Pill value={row.status} />
+
                         {row.message && (
                           <small title={row.message}>{row.message}</small>
                         )}
                       </td>
-                      {preview.fields.map((field) => (
+                      {visibleFields.map((field) => (
                         <td key={field} title={row.data[field]}>
                           {row.data[field]?.slice(0, 160)}
                         </td>
                       ))}
+                      <td>
+                        <Pill value={row.status} />
+                      </td>
                       <td>
                         {row.status === "UNKNOWN" ? (
                           <button
@@ -2639,36 +2703,160 @@ function ManualImporter({
                   ))}
                 </tbody>
               </table>
-              {!preview.rows.length && (
-                <Empty>No records match this Lead Configuration.</Empty>
+              {!pageRows.length && (
+                <Empty>
+                  {search
+                    ? "No records match your search."
+                    : "No records match this Lead Configuration."}
+                </Empty>
               )}
             </div>
-            <div className="pipe-pagination">
-              <span>
-                {preview.total ? (page - 1) * 50 + 1 : 0}–
-                {Math.min(page * 50, preview.total)} of {preview.total}
-              </span>
+          )}
+          <div className="ls-table-footer">
+            <span>
+              {selected.length} of {preview?.total.toLocaleString() || 0}{" "}
+              selected
+            </span>
+            <div className="ls-table-pages">
               <button
-                className="admin-secondary"
+                className="ls-page-arrow"
+                aria-label="Previous page"
                 disabled={page <= 1}
                 onClick={() => setPage((value) => value - 1)}
               >
-                Previous
+                <ChevronLeft size={18} />
               </button>
-              <span>
-                {page} / {Math.max(1, Math.ceil(preview.total / 50))}
-              </span>
+              {Array.from(
+                { length: Math.min(5, pageCount) },
+                (_, index) =>
+                  Math.max(1, Math.min(page - 2, pageCount - 4)) + index,
+              ).map((value) => (
+                <button
+                  className={page === value ? "active" : ""}
+                  key={value}
+                  onClick={() => setPage(value)}
+                  aria-label={"Page " + value}
+                  aria-current={page === value ? "page" : undefined}
+                >
+                  {value}
+                </button>
+              ))}
+              {pageCount > 5 && <span>… {pageCount}</span>}
               <button
-                className="admin-secondary"
-                disabled={page * 50 >= preview.total}
+                className="ls-page-arrow"
+                aria-label="Next page"
+                disabled={page >= pageCount}
                 onClick={() => setPage((value) => value + 1)}
               >
-                Next
+                <ChevronRight size={18} />
               </button>
             </div>
-          </section>
-        </>
+          </div>
+          <details className="ls-import-tools">
+            <summary>Data tools & destination options</summary>
+            <div className="pipe-actions">
+              <button
+                className="admin-secondary"
+                disabled={active}
+                onClick={() => void loadLists()}
+              >
+                <RefreshCw size={15} />
+                Refresh contact lists
+              </button>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={allFields}
+                  onChange={(event) => setAllFields(event.target.checked)}
+                />
+                Show all fields ({preview?.fields.length || 0})
+              </label>
+              {preview && (
+                <a
+                  className="admin-secondary"
+                  href={endpoint + "/leads/" + leadId + "/export"}
+                >
+                  Export CSV
+                </a>
+              )}{" "}
+              <button
+                className="admin-secondary danger-link"
+                disabled={active || !listId}
+                onClick={() => {
+                  if (
+                    window.prompt(
+                      "This removes ALL contacts from the selected Genesys Contact List. Type CLEAR to continue.",
+                    ) !== "CLEAR"
+                  )
+                    return;
+                  setStarting(true);
+                  void api<{ message: string }>(
+                    `${endpoint}/contact-lists/${listId}/clear`,
+                    {
+                      method: "POST",
+                      body: JSON.stringify({ confirmation: "CLEAR" }),
+                    },
+                  )
+                    .then(() => setReload((value) => value + 1))
+                    .catch((error) => onError(error.message))
+                    .finally(() => setStarting(false));
+                }}
+              >
+                Clear list
+              </button>
+            </div>
+            <p className="pipe-muted">
+              The destination applies to this import only. Clearing a list
+              requires typing CLEAR.
+            </p>
+          </details>
+        </section>
+      </div>
+      <LeadSyncInsights data={data} contactLists={lists.length} />
+      {confirmation && preview && (
+        <Modal
+          title="Confirm lead import"
+          onClose={() => setConfirmation(null)}
+        >
+          <div className="ls-confirm-import">
+            <Upload size={36} />
+            <h3>Ready to import your leads?</h3>
+            <p>
+              Import{" "}
+              <strong>
+                {confirmation.ids?.length ?? preview.summary.eligible} records
+              </strong>{" "}
+              from <strong>{preview.lead.name}</strong> into{" "}
+              <strong>
+                {lists.find((list) => list.id === listId)?.name || listId}
+              </strong>
+              .
+            </p>
+            <p>
+              Existing contacts are updated and unchanged records are skipped.
+            </p>
+            <div className="pipe-form-actions">
+              <button
+                className="admin-secondary"
+                onClick={() => setConfirmation(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="admin-primary"
+                onClick={() => {
+                  const ids = confirmation.ids;
+                  setConfirmation(null);
+                  void start(ids, true);
+                }}
+              >
+                <Upload size={17} />
+                Confirm import
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
-    </>
+    </div>
   );
 }
