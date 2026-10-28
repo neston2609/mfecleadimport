@@ -421,6 +421,20 @@ test(
       await t.test(
         "scheduled imports use Lead Configuration and retain dependency checks",
         async () => {
+          await assert.rejects(
+            schedules.saveSchedule(
+              {
+                name: "Wrong destination",
+                leadId: lead.id,
+                contactListId: "22222222-2222-4222-8222-222222222222",
+                frequency: "DAILY",
+                time: "09:00",
+                enabled: false,
+              },
+              "test",
+            ),
+            /Source Mapping/,
+          );
           const schedule = await schedules.saveSchedule(
             {
               name: "Daily leads",

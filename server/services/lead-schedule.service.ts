@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { importSchedules, leadDefinitions } from "../domain/pipeline-store";
+import {
+  importSchedules,
+  leadDefinitions,
+  sourceMappings,
+} from "../domain/pipeline-store";
+import { configuredContactList } from "./contact-list.service";
 import type { ImportSchedule } from "../domain/pipeline-types";
 import { httpError } from "../domain/business";
 import { entity, saveEntity } from "./lead-pipeline.service";
@@ -14,7 +19,7 @@ export const scheduleInput = z
   .object({
     name: z.string().trim().min(1).max(120),
     leadId: z.string().uuid(),
-    contactListId: z.string().uuid(),
+    contactListId: z.string().min(1).max(200),
     frequency: z.enum(["DAILY", "WEEKLY", "MONTHLY", "MONTH_DAYS"]),
     time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
     dayOfWeek: z.number().int().min(0).max(6).default(1),
@@ -64,7 +69,14 @@ export async function saveSchedule(input: unknown, actor: string, id?: string) {
   if (id && runningSchedules.has(id))
     throw httpError(409, "Schedule is currently running");
   const data = scheduleInput.parse(input);
-  await entity(leadDefinitions, data.leadId);
+  const lead = await entity(leadDefinitions, data.leadId);
+  const mapping = await entity(sourceMappings, lead.mappingId);
+  if (data.contactListId !== mapping.contactListId)
+    throw httpError(
+      400,
+      "Select the Genesys Contact List configured in this lead's Source Mapping.",
+    );
+  await configuredContactList(data.contactListId);
   const previous = id ? await entity(importSchedules, id) : undefined;
   const saved = await saveEntity(
     importSchedules,

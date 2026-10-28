@@ -550,10 +550,12 @@ export function PipelineWorkspace({ page }: { page: Page }) {
   const destinationPicker = (
     value: string,
     onChange: (value: string) => void,
+    disabled = false,
   ) => (
     <div className="pipe-inline">
       <select
         aria-label="Genesys Contact List"
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -1794,7 +1796,18 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                 <select
                   value={schedule.leadId || ""}
                   onChange={(event) =>
-                    setSchedule({ ...schedule, leadId: event.target.value })
+                    setSchedule({
+                      ...schedule,
+                      leadId: event.target.value,
+                      contactListId:
+                        data.mappings.find(
+                          (mapping) =>
+                            mapping.id ===
+                            data.leads.find(
+                              (lead) => lead.id === event.target.value,
+                            )?.mappingId,
+                        )?.contactListId || "",
+                    })
                   }
                 >
                   <option value="">Select lead</option>
@@ -1807,9 +1820,14 @@ export function PipelineWorkspace({ page }: { page: Page }) {
               </label>
               <label>
                 Genesys Contact List
-                {destinationPicker(schedule.contactListId || "", (value) =>
-                  setSchedule({ ...schedule, contactListId: value }),
+                {destinationPicker(
+                  schedule.contactListId || "",
+                  (value) => setSchedule({ ...schedule, contactListId: value }),
+                  Boolean(schedule.leadId),
                 )}
+                <small className="pipe-muted">
+                  Destination follows the selected lead's Source Mapping.
+                </small>
               </label>
               <div className="pipe-field-grid">
                 <label>

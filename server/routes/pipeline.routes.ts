@@ -109,7 +109,7 @@ for (const [kind, handler] of Object.entries(handlers)) {
 }
 pipelineRouter.get("/leads/:id/preview", async (request, response) => {
   const listId = request.query.contactListId
-    ? z.string().uuid().parse(request.query.contactListId)
+    ? z.string().min(1).max(200).parse(request.query.contactListId)
     : "";
   const preview = await resolveLead(request.params.id, listId);
   response.json({
