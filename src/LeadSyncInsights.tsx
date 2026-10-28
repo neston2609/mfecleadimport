@@ -246,21 +246,21 @@ export function LeadSyncInsights({
               data={chart}
               margin={{ top: 8, right: 0, left: -28, bottom: 0 }}
             >
-              <CartesianGrid vertical={false} stroke="#e9eff8" />
+              <CartesianGrid vertical={false} stroke="var(--ls-chart-grid)" />
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 9, fill: "#60749b" }}
+                tick={{ fontSize: 9, fill: "var(--ls-muted)" }}
                 tickLine={false}
                 axisLine={false}
                 interval={days === 7 ? 0 : 2}
               />
               <YAxis
                 allowDecimals={false}
-                tick={{ fontSize: 10, fill: "#60749b" }}
+                tick={{ fontSize: 10, fill: "var(--ls-muted)" }}
                 tickLine={false}
                 axisLine={false}
               />
-              <Tooltip cursor={{ fill: "#f1f6ff" }} />
+              <Tooltip cursor={{ fill: "var(--ls-raised)" }} />
               <Bar
                 dataKey="records"
                 name="Records imported"

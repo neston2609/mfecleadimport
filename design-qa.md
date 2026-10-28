@@ -2,6 +2,10 @@
 
 final result: passed
 
+## Theme follow-up
+
+The subsequent user request adds Light/Dark selection and supplies replacement MFEC logos. These intentional changes supersede the reference's fixed light palette and generated wordmark. Both themes, persistent preference, mobile controls, dialogs, Genesys settings and chart colors were checked in the browser. See [Theme notes](docs/THEMES.md) and its captured examples.
+
 ## Visual targets and evidence
 
 - Login reference: `C:/Users/ton_s/Downloads/MFEC LeadSync Data to Opportunities-1.png` (1586 × 992).

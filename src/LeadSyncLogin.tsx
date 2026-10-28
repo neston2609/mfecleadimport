@@ -10,6 +10,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { api } from "./lib/api";
+import { MfecBrand, ThemeToggle } from "./Theme";
 
 export function LeadSyncLogin({
   portal,
@@ -60,17 +61,20 @@ export function LeadSyncLogin({
           src="/images/leadsync-login-hero.png"
           alt="MFEC LeadSync. Turn Data into Opportunities. Connect, Transform, Engage. Unify customer leads from Database, Web Service, CSV and JSON, and activate campaigns in Genesys Cloud."
         />
+        <div className="ls-hero-brand">
+          <MfecBrand />
+          <small>INTEGRATE · MANAGE · ACTIVATE</small>
+        </div>
       </aside>
       <main className="ls-login-side">
-        <div className="ls-language">
-          <Globe2 size={17} /> English
+        <div className="ls-login-preferences">
+          <ThemeToggle />
+          <div className="ls-language">
+            <Globe2 size={17} /> English
+          </div>
         </div>
         <div className="ls-login-form-wrap">
-          <img
-            className="ls-mobile-wordmark"
-            src="/images/leadsync-wordmark.png"
-            alt="MFEC LeadSync"
-          />
+          <MfecBrand className="ls-login-brand" />
           <div className="ls-login-eyebrow">MFEC LEADSYNC</div>
           <h1>Welcome back</h1>
           <p className="ls-login-subtitle">Sign in to MFEC LeadSync</p>

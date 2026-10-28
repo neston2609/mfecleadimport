@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "./lib/api";
 import type { ImportJob } from "../server/domain/pipeline-types";
+import { MfecBrand, ThemeToggle } from "./Theme";
 
 const pages = [
   ["Dashboard", "/"],
@@ -120,7 +121,7 @@ export function LeadSyncHeader({
         <Menu size={22} />
       </button>
       <a className="ls-wordmark" href="/" aria-label="MFEC LeadSync dashboard">
-        <img src="/images/leadsync-wordmark.png" alt="MFEC LeadSync" />
+        <MfecBrand />
       </a>
       <div className="ls-global-search">
         <Search size={18} />
@@ -160,6 +161,7 @@ export function LeadSyncHeader({
         <b>Genesys Cloud</b>
         <small>{connection}</small>
       </a>
+      <ThemeToggle />
       <div className="ls-header-action">
         <button
           className="ls-notification"

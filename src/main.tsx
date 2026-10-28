@@ -12,8 +12,12 @@ import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
 import "./leadsync.css";
+import "./theme.css";
+import { ThemeProvider } from "./Theme";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Root />
+    <ThemeProvider>
+      <Root />
+    </ThemeProvider>
   </React.StrictMode>,
 );

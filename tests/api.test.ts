@@ -98,7 +98,7 @@ test(
       const homepage = await request("/");
       assert.equal(homepage.status, 200);
       assert.equal(homepage.headers.get("location"), null);
-      assert.match(await homepage.text(), /MFEC Lead Import\/Export/);
+      assert.match(await homepage.text(), /MFEC LeadSync/);
       for (const [oldPath, newPath] of [
         ["/genesys", "/"],
         ["/genesys/", "/"],
