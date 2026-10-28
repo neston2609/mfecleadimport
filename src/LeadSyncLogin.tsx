@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "./lib/api";
 import { MfecBrand, ThemeToggle } from "./Theme";
+import { Footer } from "./Footer";
 
 export function LeadSyncLogin({
   portal,
@@ -186,10 +187,7 @@ export function LeadSyncLogin({
             </div>
           )}
         </div>
-        <footer>
-          © {new Date().getFullYear()} MFEC Public Company Limited. All rights
-          reserved.
-        </footer>
+        <Footer />
       </main>
     </div>
   );

@@ -56,6 +56,7 @@ import type {
 
 import { App as GenesysSettings } from "./App";
 import { PipelineWorkspace } from "./PipelineWorkspace";
+import { Footer } from "./Footer";
 import { LeadSyncLogin as Login } from "./LeadSyncLogin";
 import { LeadSyncHeader } from "./LeadSyncChrome";
 
@@ -426,6 +427,7 @@ function AdminPortal({
             <div className="empty-state">Page not found</div>
           )}
         </main>
+        <Footer />
       </div>
     </div>
   );
