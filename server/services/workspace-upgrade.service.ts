@@ -1,4 +1,11 @@
-import { readFile, writeFile, mkdir, rename, copyFile } from "node:fs/promises";
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  copyFile,
+  open,
+  unlink,
+} from "node:fs/promises";
 import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { dataDir, backupsDir } from "../domain/json-repository";
@@ -212,7 +219,17 @@ export async function upgradeWorkspace() {
   ]) {
     try {
       await mkdir(path.dirname(path.join(archive, name)), { recursive: true });
-      await rename(path.join(dataDir, name), path.join(archive, name));
+      // systemd can expose data and backups as different mounts. Persist the
+      // archived copy before removing the active file; rename cannot cross them.
+      const archived = path.join(archive, name);
+      await copyFile(path.join(dataDir, name), archived);
+      const handle = await open(archived, "r");
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await unlink(path.join(dataDir, name));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

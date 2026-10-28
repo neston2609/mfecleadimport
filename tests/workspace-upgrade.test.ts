@@ -15,7 +15,15 @@ import os from "node:os";
 test("workspace upgrade preserves mappings, source records and remote identities across partial retries", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "mfec-upgrade-"));
   process.env.DATA_DIR = path.join(root, "data");
-  process.env.BACKUPS_DIR = path.join(root, "backups");
+  const backupRoot = process.env.TEST_CROSS_DEVICE_BACKUPS
+    ? await mkdtemp(
+        path.join(
+          process.env.TEST_CROSS_DEVICE_BACKUPS,
+          "mfec-upgrade-backups-",
+        ),
+      )
+    : path.join(root, "backups");
+  process.env.BACKUPS_DIR = backupRoot;
   process.env.APP_SECRET = "upgrade-test-secret";
   const put = async (name: string, value: unknown) => {
     const file = path.join(process.env.DATA_DIR!, name);
@@ -129,5 +137,7 @@ test("workspace upgrade preserves mappings, source records and remote identities
     assert.ok((await readdir(process.env.BACKUPS_DIR!)).length);
   } finally {
     await rm(root, { recursive: true, force: true });
+    if (process.env.TEST_CROSS_DEVICE_BACKUPS)
+      await rm(backupRoot, { recursive: true, force: true });
   }
 });
