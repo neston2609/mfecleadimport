@@ -1,45 +1,41 @@
-# MFEC Lead Import/Export
+# MFEC LeadSync
 
-รุ่นปรับปรุงรองรับ Contact List Template → Source Integration → Source Mapping → Lead Configuration → Manual/Schedule Import ดู [คู่มือ Lead Workspace](docs/LEAD-WORKSPACE.md) สำหรับขั้นตอนใช้งาน การติดตั้ง JDBC driver และข้อจำกัดของข้อมูล
+ระบบรวม Lead จาก JDBC, Web Service, CSV และ JSON เพื่อ Mapping, Filter และนำเข้า Genesys Cloud แบบ Manual หรือ Schedule
 
-แอปนี้ติดตั้ง build และรันได้ด้วยตัวเอง ไม่ใช้ package, server, session หรือฐานข้อมูลจากแอปอื่น
+Production: https://mfecleadsync.demohub24.com/
+Repository: https://github.com/neston2609/mfecleadimport
 
-## เริ่มใช้งาน
+## Development
 
-ต้องใช้ Node.js 20.19+ หรือ 22.12+ และ npm
+Use Node.js 24 and JDK 21+.
 
 ```sh
 npm ci
-# คัดลอก .env.example เป็น .env และกำหนดค่าตามเครื่อง
-npm test
-npm run build
-npm start
+npm run setup:jdbc -- --test
+npm run dev:server
+npm run dev:client
 ```
 
-เปิด http://localhost:3002/
+Frontend: http://localhost:5175. Backend defaults to port 3002. Configure APP_SECRET, SESSION_SECRET, ADMIN_USERNAME and ADMIN_PASSWORD in the local environment. Runtime data, credentials, uploads and backups are excluded from Git. New installations start with empty source/mapping/lead configuration.
 
-สำหรับพัฒนา เปิดสอง terminal: `npm run dev:server` และ `npm run dev:client` แล้วเข้า http://localhost:5175/ ถ้าเปลี่ยน PORT ให้เปลี่ยน API_PROXY_TARGET ใน .env ตามด้วย
+## Workspace
 
-## ล็อกอินและข้อมูล
+- Dashboard: actual integration/datasource checks and import history.
+- Genesys Configuration: Region Management, Integration Setting, Contact List Configuration.
+- Source Configuration: Source Integration and Source Mapping directly to a Genesys Contact List.
+- Lead Configuration: named selections and filters.
+- Lead Importer: Manual Import Lead and Schedule Import.
+- System settings: administrator password and redacted backup downloads.
 
-ในการพัฒนาค่าเริ่มต้นคือ admin / ChangeMe123! สำหรับ production ต้องตั้ง APP_SECRET, SESSION_SECRET และ ADMIN_PASSWORD ที่รัดกุมและแยกจากระบบอื่น Bootstrap password ถูกบันทึกเป็น hash ใน data/.auth/admin.json หลังเริ่มใช้งานครั้งแรก จากนั้นลบ ADMIN_PASSWORD ออกจาก .env และเปลี่ยนรหัสผ่านผ่านหน้า Settings ได้ Session cookie ใช้ชื่อ genesys.sid และข้อมูล session อยู่ใน data/.sessions/ เฉพาะแอปนี้
+Paths: /, /regions, /integration, /contact-lists, /sources, /mappings, /leads, /manual-import, /schedule-import, /settings. Previous /genesys URLs redirect to root paths. Removed feature routes return 404.
 
-Routes: /, /import-leads, /regions, /scheduler, /campaigns, /customers, /products, /policies, /settings
+Read [Lead Workspace](docs/LEAD-WORKSPACE.md) for connector limits, import safety and JDBC support, and [Production](deploy/PRODUCTION.md) for deployment and upgrading existing data. Each application must use its own DATA_DIR and session secret. Keep exactly one scheduler per data directory.
 
-ตั้งค่า OAuth และ Contact List ใน Integration, ทดสอบการเชื่อมต่อและ Validate Schema แล้วเลือก Source campaigns ใน Import Lead Contact เพื่อ preview และส่ง lead ไป Genesys เลือก Source campaigns / Export เพื่อสร้างแคมเปญและดาวน์โหลด CSV สามารถจัดการข้อมูลต้นทางลูกค้า สินค้า และกรมธรรม์ได้ในแอปนี้เอง Scheduler ทำงานกับแคมเปญและข้อมูลภายในแอปนี้
+## Verification
 
-APP_SECRET ใช้เข้ารหัส Client Secret ต้องเก็บค่าถาวร หากย้าย config จากระบบเดิมต้องใช้ APP_SECRET เดิมหรือกรอก Client Secret ใหม่ ห้ามเปิดให้ scheduler หลาย instance ใช้ DATA_DIR เดียวกัน
+```sh
+npm run build
+npm test
+```
 
-## แยกข้อมูลและการย้ายระบบ
-
-ข้อมูลใน data/, backups/, exports/ และ .env ไม่ถูก commit เมื่อ clone repo ใหม่จะสร้างข้อมูลตัวอย่างโดยอัตโนมัติ Local checkout ที่แยกจากระบบเดิมมีสำเนาข้อมูล JSON เดิมเฉพาะส่วนที่ใช้ โดยไม่คัดลอก credentials หรือ sessions
-
-การแก้ข้อมูลในระบบหนึ่งไม่เปลี่ยนข้อมูลอีกระบบหนึ่ง ไม่มีการ sync อัตโนมัติ หากย้ายข้อมูลให้หยุดแอปปลายทาง สำรองข้อมูล แล้วคัดลอก JSON ที่ต้องการเข้า data/ ของปลายทาง ระบบ MFEC ใช้ customers.json, products.json, policies.json และ campaign-lists.json ของตัวเอง; ถ้าคัดลอกกรมธรรม์จากระบบเดิมให้ล้างสถานะ genesys ก่อนเริ่มส่งไป Contact List ใหม่ และตรวจสอบ preview
-
-DATA_DIR และ BACKUPS_DIR, EXPORTS_DIR กำหนดเป็น absolute path เพื่อย้ายข้อมูลได้ แต่ต้องใช้คนละ directory กับแอปอื่น
-
-## Deploy
-
-ตัวอย่าง systemd และ Nginx อยู่ใน deploy/ ใช้ hostname ของแต่ละระบบและเพิ่ม TLS ก่อนใช้งาน production เพราะ admin cookie บังคับ HTTPS ให้สิทธิ์เขียน data/, backups/, exports/ กับ service user และแก้ WorkingDirectory ให้ตรงกับเครื่องจริง
-
-GET /api/health ใช้ตรวจสอบสถานะ ตัวอย่างทั้งหมดใช้ข้อมูลประกันสมมติและไม่ออกกรมธรรม์หรือรับชำระเงินจริง
+Tests use isolated temporary data and a local Genesys test adapter. Production System Status always comes from real checks and recorded import jobs.

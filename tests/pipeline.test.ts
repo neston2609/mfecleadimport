@@ -7,7 +7,7 @@ import path from "node:path";
 import os from "node:os";
 
 test(
-  "pipeline reads sources, drafts Genesys fields, maps and filters leads, imports idempotently and preserves secrets",
+  "pipeline reads sources, configures Genesys Contact Lists, maps and filters leads, imports idempotently and preserves secrets",
   { timeout: 60000 },
   async (t) => {
     const folder = await mkdtemp(path.join(os.tmpdir(), "mfec-pipeline-"));
@@ -51,8 +51,14 @@ test(
         dnc: true,
       },
     ];
-    let observedAuthorization = "";
+    let observedAuthorization = "",
+      failSource = false;
     const sourceServer = createServer((request, response) => {
+      if (failSource) {
+        response.writeHead(503);
+        response.end("Unavailable");
+        return;
+      }
       observedAuthorization = request.headers.authorization || "";
       response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({ records: sourceRows }));
@@ -70,10 +76,10 @@ test(
       loseNextPost = false;
     try {
       const [
-        { initializeBusinessData },
+        { initializeAudit },
         {
           initializePipeline,
-          contactTemplates,
+          contactListConfigurations,
           sourceIntegrations,
           importStates,
         },
@@ -97,7 +103,7 @@ test(
         import("../server/services/source-data.service"),
         import("../server/domain/business"),
       ]);
-      await initializeBusinessData();
+      await initializeAudit();
       await initializePipeline();
       await genesysRegionService.initialize();
       await new GenesysConfigService().updateConfig({
@@ -164,38 +170,51 @@ test(
           "Unexpected mock Genesys request: " + method + " " + url,
         );
       };
+      const contactLists =
+        await import("../server/services/contact-list.service");
       await t.test(
-        "importing Genesys fields changes no saved template",
+        "Genesys IDs are auto-configured and UUID edits require explicit confirmation",
         async () => {
-          assert.equal((await contactTemplates.all()).length, 0);
-          const draft = await pipeline.fieldsFromGenesys(listId);
-          assert.deepEqual(
-            draft.fields.map((field) => field.name),
-            columns,
+          const rows = await contactLists.refreshContactLists();
+          assert.equal(rows[0].uuid, listId);
+          await assert.rejects(
+            contactLists.saveContactListUuid(
+              listId,
+              { uuid: listId, expectedUuid: listId },
+              "test",
+            ),
           );
+          await assert.rejects(
+            contactLists.saveContactListUuid(
+              listId,
+              {
+                uuid: "22222222-2222-4222-8222-222222222222",
+                expectedUuid: listId,
+                confirmation: true,
+              },
+              "test",
+            ),
+            /must match/,
+          );
+          await assert.rejects(
+            contactLists.saveContactListUuid(
+              listId,
+              { uuid: listId, expectedUuid: "stale", confirmation: true },
+              "test",
+            ),
+            /changed since/,
+          );
+          await contactLists.saveContactListUuid(
+            listId,
+            { uuid: listId, expectedUuid: listId, confirmation: true },
+            "test",
+          );
+          await contactLists.refreshContactLists();
           assert.equal(
-            draft.fields.find((field) => field.name === "phone")?.type,
-            "PHONE",
+            (await contactListConfigurations.all())[0].uuidSource,
+            "MANUAL",
           );
-          assert.equal((await contactTemplates.all()).length, 0);
         },
-      );
-      const draft = await pipeline.fieldsFromGenesys(listId);
-      const template = await pipeline.saveTemplate(
-        {
-          ...draft,
-          name: "Custom template",
-          fields: draft.fields.map((field) => ({
-            ...field,
-            type:
-              field.name === "premium"
-                ? "NUMBER"
-                : field.name === "expiry"
-                  ? "DATE"
-                  : field.type,
-          })),
-        },
-        "test",
       );
       const source = await pipeline.saveSource(
         {
@@ -226,7 +245,7 @@ test(
         {
           name: "Customer mapping",
           sourceId: source.id,
-          templateId: template.id,
+          contactListId: listId,
           keyField: "id",
           fields: columns.map((targetField, index) => ({
             targetField,
@@ -234,6 +253,14 @@ test(
               index
             ],
             defaultValue: "",
+            type:
+              targetField === "premium"
+                ? "NUMBER"
+                : targetField === "expiry"
+                  ? "DATE"
+                  : targetField === "phone"
+                    ? "PHONE"
+                    : "STRING",
           })),
         },
         "test",
@@ -413,7 +440,7 @@ test(
             /in use/,
           );
           await assert.rejects(
-            pipeline.deleteConfiguration("templates", template.id, "test"),
+            pipeline.deleteConfiguration("mappings", mapping.id, "test"),
             /in use/,
           );
         },
@@ -538,6 +565,37 @@ test(
       );
       assert.ok(
         (await importStates.all()).every((state) => state.status !== "PENDING"),
+      );
+      await t.test(
+        "system status derives connection, source failures and latest imports from real operations",
+        async () => {
+          const { systemStatus } =
+            await import("../server/services/system-status.service");
+          const healthy = await systemStatus(true);
+          assert.equal(healthy.integration.status, "CONNECTED");
+          const current = healthy.sources.find(
+            (item) => item.id === source.id,
+          )!;
+          assert.equal(current.status, "ACTIVE");
+          assert.equal(current.lastSyncStatus, "SUCCESS");
+          assert.ok(current.lastSyncTime);
+          failSource = true;
+          try {
+            const failed = await systemStatus(true);
+            assert.equal(
+              failed.sources.find((item) => item.id === source.id)!.status,
+              "ERROR",
+            );
+          } finally {
+            failSource = false;
+          }
+          assert.equal(
+            (await systemStatus(true)).sources.find(
+              (item) => item.id === source.id,
+            )!.status,
+            "ACTIVE",
+          );
+        },
       );
       await t.test(
         "clearing a destination resets its generic import identities",

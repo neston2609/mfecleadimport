@@ -7,7 +7,7 @@
   --muted: #657078;
   --line: #e2e6e8;
   --surface: #f7f9fa;
-  font-family: Arial, "Noto Sans Thai", sans-serif;
+  font-family: "Century Gothic", Prompt, Arial, sans-serif;
   color: var(--ink);
   letter-spacing: 0;
 }

@@ -1,3 +1,4 @@
+import { recordSourceObservation } from "./source-observation.service";
 import { parse } from "csv-parse/sync";
 import { lookup } from "node:dns/promises";
 import http from "node:http";
@@ -420,7 +421,7 @@ async function executeJdbc(
   };
 }
 
-export async function loadSource(
+async function executeSource(
   source: SourceIntegration,
   connectOnly = false,
 ): Promise<SourceData> {
@@ -463,32 +464,30 @@ export async function loadSource(
     }
     return bounded(selectJsonRows(parsed, source.config.resultPath));
   }
-  const [{ campaigns, policies, customers, products }, { buildPreview }] =
-    await Promise.all([
-      import("../domain/store"),
-      import("../domain/campaign-contact"),
-    ]);
-  const campaign = await campaigns.findById(
-    "campaignListId",
-    source.config.campaignListId || "",
-  );
-  if (!campaign) throw httpError(404, "Legacy source campaign not found");
-  const preview = buildPreview(
-    await policies.all(),
-    await customers.all(),
-    await products.all(),
-    campaign.filters,
-  );
-  return bounded(
-    preview.rows.map((row) => ({
-      ...row.contact,
-      policyId: row.policy.policyId,
-      dnc: row.customer.dnc,
-      legacyEligible: [
-        "ELIGIBLE",
-        "ALREADY_SYNCED",
-        "RELOAD_AVAILABLE",
-      ].includes(row.eligibility),
-    })),
-  );
+  throw httpError(400, "Unsupported source protocol");
+}
+
+export async function loadSource(
+  source: SourceIntegration,
+  connectOnly = false,
+  record = true,
+): Promise<SourceData> {
+  try {
+    const result = await executeSource(source, connectOnly);
+    if (record)
+      await recordSourceObservation(
+        source.id,
+        "ACTIVE",
+        "Source read successfully",
+      );
+    return result;
+  } catch (error) {
+    if (record && (error as { status?: number }).status !== 429)
+      await recordSourceObservation(
+        source.id,
+        "ERROR",
+        "Source connection or read failed. Check the configured credentials, file, query or network.",
+      );
+    throw error;
+  }
 }

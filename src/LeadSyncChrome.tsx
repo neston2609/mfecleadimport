@@ -15,12 +15,12 @@ import { MfecBrand, ThemeToggle } from "./Theme";
 
 const pages = [
   ["Dashboard", "/"],
-  ["Contact List Templates", "/templates"],
+  ["Contact List Configuration", "/contact-lists"],
   ["Source Integration", "/sources"],
   ["Source Mapping", "/mappings"],
   ["Lead Configuration", "/leads"],
   ["Region Management", "/regions"],
-  ["Integration Settings", "/integration"],
+  ["Integration Setting", "/integration"],
   ["Manual Import", "/manual-import"],
   ["Schedule Import", "/schedule-import"],
   ["System settings", "/settings"],
@@ -70,7 +70,7 @@ export function LeadSyncHeader({
         jobs: ImportJob[];
         sources: { name: string }[];
         leads: { name: string }[];
-        templates: { name: string }[];
+        contactLists: { name: string }[];
       }>("/api/admin/pipeline/bootstrap")
         .then((value) => {
           if (active) {
@@ -84,9 +84,9 @@ export function LeadSyncHeader({
                 label: item.name,
                 url: "/leads",
               })),
-              ...value.templates.map((item) => ({
+              ...value.contactLists.map((item) => ({
                 label: item.name,
-                url: "/templates",
+                url: "/contact-lists",
               })),
             ]);
           }

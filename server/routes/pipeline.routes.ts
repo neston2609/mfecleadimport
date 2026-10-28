@@ -1,15 +1,18 @@
+import { systemStatus } from "../services/system-status.service";
+import {
+  saveContactListUuid,
+  configuredContactList,
+} from "../services/contact-list.service";
 import { Router } from "express";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/require-admin";
 import {
   bootstrapPipeline,
-  saveTemplate,
   saveSource,
   saveMapping,
   saveLead,
   deleteConfiguration,
   previewSource,
-  fieldsFromGenesys,
   contactLists,
   contactList,
   resolveLead,
@@ -32,55 +35,34 @@ import { GenesysConfigService } from "../services/genesys/genesys-config.service
 
 export const pipelineRouter = Router();
 pipelineRouter.use(requireAdmin);
+pipelineRouter.get("/status", async (_req, res) =>
+  res.json(await systemStatus()),
+);
+pipelineRouter.post("/status/refresh", async (_req, res) =>
+  res.json(await systemStatus(true)),
+);
+pipelineRouter.put("/contact-lists/:id/uuid", async (req, res) =>
+  res.json(await saveContactListUuid(req.params.id, req.body, req.user!.name)),
+);
 pipelineRouter.get("/bootstrap", async (_request, response) =>
   response.json(await bootstrapPipeline()),
 );
 pipelineRouter.get("/contact-lists", async (_request, response) =>
-  response.json({ items: await contactLists() }),
+  response.json({
+    items: (await contactLists()).map((row) => ({
+      ...row,
+      id: row.contactListId,
+    })),
+  }),
+);
+pipelineRouter.get("/contact-lists/:id", async (req, res) =>
+  res.json(await configuredContactList(req.params.id, true)),
 );
 pipelineRouter.post("/contact-lists/:id/clear", async (request, response) => {
   z.object({ confirmation: z.literal("CLEAR") }).parse(request.body);
-  const id = z.string().uuid().parse(request.params.id);
+  const id = z.string().min(1).max(200).parse(request.params.id);
   response.json(await clearLeadDestination(id, request.user!.name));
 });
-pipelineRouter.post("/templates/import-fields", async (request, response) => {
-  const { contactListId } = z
-    .object({ contactListId: z.string().uuid() })
-    .parse(request.body);
-  // Deliberately return an unsaved draft. Only POST/PUT templates persists it.
-  response.json(await fieldsFromGenesys(contactListId));
-});
-pipelineRouter.post(
-  "/genesys/validate-contact-list",
-  async (request, response) => {
-    const service = new GenesysConfigService();
-    const config = await service.getConfig();
-    const list = await contactList(config.contactListId);
-    const valid = Boolean(
-      list.columnNames?.length && list.phoneColumns?.length,
-    );
-    await service.markSchema(valid ? "VALID" : "INVALID");
-    response.json({
-      ok: valid,
-      message: valid
-        ? "Contact List fields and phone configuration loaded. Templates are validated against this destination when importing."
-        : "Configure columns and a phone column on the Genesys Contact List.",
-      schema: {
-        valid,
-        message: valid
-          ? "Contact List is ready"
-          : "Missing fields or phone configuration",
-        mapping: (list.columnNames || []).map((name) => ({
-          applicationField: name,
-          genesysColumn: name,
-          status: "OK",
-        })),
-        unexpectedColumns: [],
-        phoneColumnValid: Boolean(list.phoneColumns?.length),
-      },
-    });
-  },
-);
 pipelineRouter.post("/sources/preview", async (request, response) =>
   response.json(
     await previewSource(
@@ -107,7 +89,6 @@ pipelineRouter.post("/sources/:id/preview", async (request, response) => {
   });
 });
 const handlers = {
-  templates: saveTemplate,
   sources: saveSource,
   mappings: saveMapping,
   leads: saveLead,
@@ -161,7 +142,7 @@ pipelineRouter.post("/imports", async (request, response) => {
   const data = z
     .object({
       leadId: z.string().uuid(),
-      contactListId: z.string().uuid(),
+      contactListId: z.string().min(1).max(200),
       revision: z.string().max(100).optional(),
       recordIds: z.array(z.string().max(100)).min(1).max(10000).optional(),
     })

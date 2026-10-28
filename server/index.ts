@@ -8,16 +8,16 @@ import { fileURLToPath } from "node:url";
 import { genesysAdminRouter } from "./routes/genesys-admin.routes";
 import { adminDataRouter } from "./routes/admin-data.routes";
 import { authRouter } from "./routes/auth.routes";
-import { campaignRouter } from "./routes/campaign.routes";
-import { initializeBusinessData } from "./domain/store";
+
+import { initializeAudit } from "./domain/store";
 import { FileSessionStore } from "./middleware/file-session-store";
 import { genesysRegionService } from "./services/genesys/genesys-region.service";
 import { adminCredentials } from "./services/admin-credentials.service";
-import { genesysSchedulerService } from "./services/genesys/genesys-scheduler.service";
+
 import { pipelineRouter } from "./routes/pipeline.routes";
 import { initializePipeline } from "./domain/pipeline-store";
 import { startLeadScheduler } from "./services/lead-schedule.service";
-import { migrateLegacyCampaigns } from "./services/pipeline-migration.service";
+import { upgradeWorkspace } from "./services/workspace-upgrade.service";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,16 +91,27 @@ app.get("/api/health", (_request, response) => {
 
 app.use("/api/admin/genesys", genesysAdminRouter);
 app.use("/api/admin/auth", authRouter);
-app.use("/api/admin/campaigns", campaignRouter);
+
 app.use("/api/admin/pipeline", pipelineRouter);
 app.use("/api/admin", adminDataRouter);
 app.use("/api", (_request, response) =>
   response.status(404).json({ message: "API endpoint not found" }),
 );
 
-app.use(["/manage"], (_request, response) => {
-  response.status(404).send("Page not found");
-});
+app.use(
+  [
+    "/manage",
+    "/templates",
+    "/campaigns",
+    "/customers",
+    "/products",
+    "/policies",
+    "/legacy-scheduler",
+  ],
+  (_request, response) => {
+    response.status(404).send("Page not found");
+  },
+);
 app.use("/genesys", (request, response) => {
   const target = request.originalUrl
     .replace(/^\/genesys(?=\/|\?|$)/i, "")
@@ -140,10 +151,10 @@ app.use(
 
 await adminCredentials.initialize();
 await genesysRegionService.initialize();
-await initializeBusinessData();
+await initializeAudit();
 await initializePipeline();
-await migrateLegacyCampaigns();
-await genesysSchedulerService.start();
+await upgradeWorkspace();
+
 await startLeadScheduler();
 
 app.listen(port, host, () => {

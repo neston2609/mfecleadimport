@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { api } from "./lib/api";
 import type {
-  ContactTemplate,
+  ContactListConfiguration,
   ContactField,
   SourceIntegration,
   SourceMapping,
@@ -39,13 +39,14 @@ import type {
 } from "../server/domain/pipeline-types";
 import "./pipeline.css";
 import { LeadSyncInsights, LeadSyncMetrics } from "./LeadSyncInsights";
+import { SystemStatus } from "./SystemStatus";
 
 const endpoint = "/api/admin/pipeline";
 type SourceView = Omit<SourceIntegration, "secretEncrypted"> & {
   secretConfigured: boolean;
 };
 type Bootstrap = {
-  templates: ContactTemplate[];
+  contactLists: ContactListConfiguration[];
   sources: SourceView[];
   mappings: SourceMapping[];
   leads: LeadDefinition[];
@@ -53,7 +54,7 @@ type Bootstrap = {
   jobs: ImportJob[];
 };
 const empty: Bootstrap = {
-  templates: [],
+  contactLists: [],
   sources: [],
   mappings: [],
   leads: [],
@@ -62,7 +63,6 @@ const empty: Bootstrap = {
 };
 type Page =
   | "overview"
-  | "templates"
   | "sources"
   | "mappings"
   | "leads"
@@ -81,17 +81,13 @@ const titles: Record<Page, [string, string]> = {
     "LeadSync Dashboard",
     "Connect your sources, map your data, and deliver leads to Genesys.",
   ],
-  templates: [
-    "Contact List Template",
-    "Define destination fields or import a Genesys Contact List schema into an unsaved draft.",
-  ],
   sources: [
     "Source Integration",
     "Connect a database or Web Service, or upload a CSV / JSON file.",
   ],
   mappings: [
     "Source Mapping",
-    "Connect source fields to a Contact List Template and choose a stable record key.",
+    "Connect source fields to a Genesys Contact List and choose a stable record key.",
   ],
   leads: [
     "Lead Configuration",
@@ -317,20 +313,12 @@ export function PipelineWorkspace({ page }: { page: Page }) {
     [error, setError] = useState(""),
     [message, setMessage] = useState("");
   const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
-  const [template, setTemplate] = useState<
-    | (Partial<ContactTemplate> & {
-        name: string;
-        fields: ContactField[];
-        contactListId: string;
-      })
-    | null
-  >(null);
   const [source, setSource] = useState<DraftSource | null>(null),
     [sourceData, setSourceData] = useState<SourceData | null>(null);
   const [mapping, setMapping] = useState<
     | (Partial<SourceMapping> & {
         name: string;
-        templateId: string;
+        contactListId: string;
         sourceId: string;
         keyField: string;
         fields: SourceMapping["fields"];
@@ -350,21 +338,6 @@ export function PipelineWorkspace({ page }: { page: Page }) {
     null,
   );
   const [leadPreview, setLeadPreview] = useState<LeadPreview | null>(null);
-  useEffect(() => {
-    if (!["templates", "manual-import", "schedule-import"].includes(page))
-      return;
-    let current = true;
-    void api<{ items: { id: string; name: string }[] }>(
-      endpoint + "/contact-lists",
-    )
-      .then((value) => {
-        if (current) setLists(value.items);
-      })
-      .catch(() => undefined);
-    return () => {
-      current = false;
-    };
-  }, [page]);
   async function refresh() {
     const value = await api<Bootstrap>(endpoint + "/bootstrap");
     setData(value);
@@ -377,6 +350,23 @@ export function PipelineWorkspace({ page }: { page: Page }) {
         if (active) {
           setData(value);
           setLoading(false);
+          if (["mappings", "manual-import", "schedule-import"].includes(page)) {
+            void api<{ items: ContactListConfiguration[] }>(
+              endpoint + "/contact-lists",
+            )
+              .then((result) => {
+                if (active) {
+                  setLists(result.items);
+                  setData((previous) => ({
+                    ...previous,
+                    contactLists: result.items,
+                  }));
+                }
+              })
+              .catch((reason) => {
+                if (active) setError(reason.message);
+              });
+          }
         }
       })
       .catch((reason) => {
@@ -411,10 +401,11 @@ export function PipelineWorkspace({ page }: { page: Page }) {
   }
   const loadLists = () =>
     run("contact-lists", async () => {
-      const result = await api<{ items: { id: string; name: string }[] }>(
+      const result = await api<{ items: ContactListConfiguration[] }>(
         endpoint + "/contact-lists",
       );
       setLists(result.items);
+      setData((previous) => ({ ...previous, contactLists: result.items }));
       if (!result.items.length)
         setMessage(
           "No Genesys Contact Lists found. Check the configured region and OAuth permissions.",
@@ -448,8 +439,6 @@ export function PipelineWorkspace({ page }: { page: Page }) {
     setError("");
     setMessage("");
     setSourceData(null);
-    if (page === "templates")
-      setTemplate({ name: "", fields: [], contactListId: "" });
     if (page === "sources")
       setSource({
         name: "",
@@ -459,7 +448,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
     if (page === "mappings")
       setMapping({
         name: "",
-        templateId: "",
+        contactListId: "",
         sourceId: "",
         keyField: "",
         fields: [],
@@ -480,8 +469,8 @@ export function PipelineWorkspace({ page }: { page: Page }) {
       });
   }
   const [title, description] = titles[page];
-  const selectedTemplate = data.templates.find(
-    (item) => item.id === mapping?.templateId,
+  const selectedDestination = data.contactLists.find(
+    (item) => item.contactListId === mapping?.contactListId,
   );
   const selectedSource = data.sources.find(
     (item) => item.id === mapping?.sourceId,
@@ -489,21 +478,12 @@ export function PipelineWorkspace({ page }: { page: Page }) {
   const selectedMapping = data.mappings.find(
     (item) => item.id === lead?.mappingId,
   );
-  const filterTemplate = data.templates.find(
-    (item) => item.id === selectedMapping?.templateId,
+  const filterDestination = data.contactLists.find(
+    (item) => item.contactListId === selectedMapping?.contactListId,
   );
   const filterSource = data.sources.find(
     (item) => item.id === selectedMapping?.sourceId,
   );
-  function updateTemplateFields(index: number, values: Partial<ContactField>) {
-    if (template)
-      setTemplate({
-        ...template,
-        fields: template.fields.map((field, i) =>
-          i === index ? { ...field, ...values } : field,
-        ),
-      });
-  }
   function updateSource(values: Partial<SourceIntegration["config"]>) {
     if (source)
       setSource({ ...source, config: { ...source.config, ...values } });
@@ -522,14 +502,50 @@ export function PipelineWorkspace({ page }: { page: Page }) {
         );
     });
   }
-  function mappingFor(templateId: string, sourceId: string) {
-    const t = data.templates.find((item) => item.id === templateId),
+  function mappingFor(contactListId: string, sourceId: string) {
+    const t = data.contactLists.find(
+        (item) => item.contactListId === contactListId,
+      ),
       s = data.sources.find((item) => item.id === sourceId);
     return (t?.fields || []).map((field) => ({
       targetField: field.name,
       sourceField: s?.fields.includes(field.name) ? field.name : "",
       defaultValue: "",
     }));
+  }
+  async function chooseDestination(id: string) {
+    if (!mapping) return;
+    const row = data.contactLists.find((item) => item.contactListId === id);
+    if (!row?.uuid) {
+      setError(
+        "Configure the Contact List UUID under Genesys Configuration → Contact List Configuration before mapping.",
+      );
+      return;
+    }
+    await run("schema", async () => {
+      const schema = await api<ContactListConfiguration>(
+        endpoint + "/contact-lists/" + encodeURIComponent(id),
+      );
+      setData((previous) => ({
+        ...previous,
+        contactLists: previous.contactLists.map((item) =>
+          item.contactListId === id ? schema : item,
+        ),
+      }));
+      setMapping({
+        ...mapping,
+        contactListId: id,
+        fields: schema.fields.map((field) => ({
+          targetField: field.name,
+          sourceField: selectedSource?.fields.includes(field.name)
+            ? field.name
+            : "",
+          defaultValue: "",
+          type: field.type,
+          required: field.required,
+        })),
+      });
+    });
   }
   const destinationPicker = (
     value: string,
@@ -593,7 +609,6 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                 : "Create " +
                   (
                     {
-                      templates: "template",
                       sources: "source",
                       mappings: "mapping",
                       leads: "lead",
@@ -629,21 +644,22 @@ export function PipelineWorkspace({ page }: { page: Page }) {
           <>
             {page === "overview" && (
               <>
+                <SystemStatus />
                 <div className="pipe-stat-grid">
                   {[
-                    ["Contact templates", data.templates.length, "templates"],
-                    ["Source integrations", data.sources.length, "sources"],
-                    ["Lead configurations", data.leads.length, "leads"],
                     [
-                      "Active schedules",
-                      data.schedules.filter((item) => item.enabled).length,
-                      "schedule-import",
+                      "Genesys Contact Lists",
+                      data.contactLists.length,
+                      "contact-lists",
                     ],
+                    ["Source integrations", data.sources.length, "sources"],
+                    ["Source mappings", data.mappings.length, "mappings"],
+                    ["Lead configurations", data.leads.length, "leads"],
                   ].map(([label, value, url]) => (
                     <a
-                      key={String(url)}
-                      href={"/" + url}
                       className="admin-panel pipe-stat"
+                      href={"/" + url}
+                      key={String(url)}
                     >
                       <span>{label}</span>
                       <strong>{value}</strong>
@@ -651,91 +667,8 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                     </a>
                   ))}
                 </div>
-                <section className="admin-panel">
-                  <h2>Your path from source to contact</h2>
-                  <p className="pipe-muted">
-                    Set up once, then reuse the same lead selection for manual
-                    and scheduled imports.
-                  </p>
-                  <div className="pipe-flow">
-                    {[
-                      [
-                        "01",
-                        "Contact List Template",
-                        "Define your destination fields",
-                        "templates",
-                      ],
-                      [
-                        "02",
-                        "Source Integration",
-                        "Connect and preview your source",
-                        "sources",
-                      ],
-                      [
-                        "03",
-                        "Source Mapping",
-                        "Map fields and choose a record key",
-                        "mappings",
-                      ],
-                      [
-                        "04",
-                        "Lead Configuration",
-                        "Filter your mapped records",
-                        "leads",
-                      ],
-                      [
-                        "05",
-                        "Lead Importer",
-                        "Send records to Genesys",
-                        "manual-import",
-                      ],
-                    ].map(([step, label, hint, url]) => (
-                      <a href={"/" + url} key={step}>
-                        <span>{step}</span>
-                        <b>{label}</b>
-                        <small>{hint}</small>
-                        <ArrowRight size={16} />
-                      </a>
-                    ))}
-                  </div>
-                </section>
                 <JobHistory jobs={data.jobs} />
               </>
-            )}
-            {page === "templates" && (
-              <section className="admin-panel pipe-record-list">
-                {!data.templates.length ? (
-                  <Empty>
-                    Create your first template, or import the fields from an
-                    existing Genesys Contact List.
-                  </Empty>
-                ) : (
-                  data.templates.map((item) => (
-                    <article key={item.id}>
-                      <div>
-                        <h3>{item.name}</h3>
-                        <p>
-                          {item.fields.length} fields ·{" "}
-                          {item.fields.filter((field) => field.required).length}{" "}
-                          required {item.contactListId && "· Genesys schema"}
-                        </p>
-                        <div className="pipe-field-tags">
-                          {item.fields.slice(0, 8).map((field) => (
-                            <span key={field.name}>{field.name}</span>
-                          ))}
-                          {item.fields.length > 8 && (
-                            <span>+{item.fields.length - 8}</span>
-                          )}
-                        </div>
-                      </div>
-                      <RecordActions
-                        onEdit={() => setTemplate({ ...item })}
-                        onDelete={() => remove("templates", item.id)}
-                      />
-                    </article>
-                  ))
-                )}
-              </section>
             )}
             {page === "sources" && (
               <section className="admin-panel pipe-record-list">
@@ -757,25 +690,19 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                             item.config.table ||
                             (item.kind === "WEB"
                               ? item.config.uri?.split("?")[0]
-                              : item.kind === "LEGACY"
-                                ? "Existing campaign source"
-                                : item.kind === "JDBC"
-                                  ? "JDBC connection"
-                                  : item.kind + " source")}
+                              : item.kind === "JDBC"
+                                ? "JDBC connection"
+                                : item.kind + " source")}
                         </p>
                         <small className="pipe-muted">
                           Updated {formatDate(item.updatedAt)}
                         </small>
                       </div>
                       <RecordActions
-                        onEdit={
-                          item.kind === "LEGACY"
-                            ? undefined
-                            : () => {
-                                setSource({ ...item });
-                                setSourceData(null);
-                              }
-                        }
+                        onEdit={() => {
+                          setSource({ ...item });
+                          setSourceData(null);
+                        }}
                         onPreview={() =>
                           void run("preview", async () =>
                             setSourceData(
@@ -798,7 +725,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
               <section className="admin-panel pipe-record-list">
                 {!data.mappings.length ? (
                   <Empty>
-                    Save a Contact List Template and Source Integration first,
+                    Save a Genesys Contact List and Source Integration first,
                     then connect their fields.
                   </Empty>
                 ) : (
@@ -811,9 +738,9 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                             (source) => source.id === item.sourceId,
                           )?.name || "Missing source"}{" "}
                           →{" "}
-                          {data.templates.find(
-                            (template) => template.id === item.templateId,
-                          )?.name || "Missing template"}
+                          {data.contactLists.find(
+                            (list) => list.contactListId === item.contactListId,
+                          )?.name || "Missing Contact List"}
                         </p>
                         <small>
                           Record key: {item.keyField} ·{" "}
@@ -1047,184 +974,6 @@ export function PipelineWorkspace({ page }: { page: Page }) {
               </>
             )}
           </>
-        )}
-        {template && (
-          <Modal
-            title={
-              template.id
-                ? "Edit Contact List Template"
-                : "Create Contact List Template"
-            }
-            onClose={() => setTemplate(null)}
-          >
-            <div className="pipe-editor">
-              <label>
-                Template name
-                <input
-                  value={template.name}
-                  onChange={(event) =>
-                    setTemplate({ ...template, name: event.target.value })
-                  }
-                  placeholder="e.g. Customer renewal contacts"
-                />
-              </label>
-              <section className="pipe-subpanel">
-                <h3>Import fields from Genesys</h3>
-                {destinationPicker(template.contactListId, (value) =>
-                  setTemplate({ ...template, contactListId: value }),
-                )}
-                <button
-                  className="admin-secondary"
-                  disabled={!template.contactListId || Boolean(busy)}
-                  onClick={() =>
-                    void run("import-fields", async () => {
-                      const result = await api<{
-                        fields: ContactField[];
-                        name: string;
-                        contactListId: string;
-                      }>(endpoint + "/templates/import-fields", {
-                        method: "POST",
-                        body: JSON.stringify({
-                          contactListId: template.contactListId,
-                        }),
-                      });
-                      setTemplate({
-                        ...template,
-                        name: template.name || result.name,
-                        fields: result.fields,
-                      });
-                      setMessage(
-                        "Fields imported into this draft. Review them and click Save Template to persist your changes.",
-                      );
-                    })
-                  }
-                >
-                  <FileUp size={16} /> Import fields
-                </button>
-                <p className="pipe-muted">
-                  Import fields fills this draft only. Nothing is saved until
-                  you click Save Template.
-                </p>
-              </section>
-              <div className="pipe-section-head">
-                <h3>Template fields</h3>
-                <button
-                  className="admin-secondary"
-                  onClick={() =>
-                    setTemplate({
-                      ...template,
-                      fields: [
-                        ...template.fields,
-                        { name: "", type: "STRING", required: false },
-                      ],
-                    })
-                  }
-                >
-                  <Plus size={15} /> Add field
-                </button>
-              </div>
-              <div className="pipe-table-scroll">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Field name</th>
-                      <th>Type</th>
-                      <th>Required</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {template.fields.map((field, index) => (
-                      <tr key={index}>
-                        <td>
-                          <input
-                            aria-label={`Field ${index + 1} name`}
-                            value={field.name}
-                            onChange={(event) =>
-                              updateTemplateFields(index, {
-                                name: event.target.value,
-                              })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <select
-                            aria-label={`Field ${index + 1} type`}
-                            value={field.type}
-                            onChange={(event) =>
-                              updateTemplateFields(index, {
-                                type: event.target
-                                  .value as ContactField["type"],
-                              })
-                            }
-                          >
-                            {[
-                              "STRING",
-                              "NUMBER",
-                              "DATE",
-                              "BOOLEAN",
-                              "PHONE",
-                            ].map((type) => (
-                              <option key={type}>{type}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            aria-label={`Field ${index + 1} required`}
-                            type="checkbox"
-                            checked={field.required}
-                            onChange={(event) =>
-                              updateTemplateFields(index, {
-                                required: event.target.checked,
-                              })
-                            }
-                          />
-                        </td>
-                        <td>
-                          <button
-                            className="pipe-icon danger-link"
-                            aria-label={`Remove field ${index + 1}`}
-                            onClick={() =>
-                              setTemplate({
-                                ...template,
-                                fields: template.fields.filter(
-                                  (_, i) => i !== index,
-                                ),
-                              })
-                            }
-                          >
-                            <X size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="pipe-form-actions">
-                <button
-                  className="admin-secondary"
-                  onClick={() => setTemplate(null)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="admin-primary"
-                  disabled={
-                    !template.name.trim() ||
-                    !template.fields.length ||
-                    Boolean(busy)
-                  }
-                  onClick={() =>
-                    void save("templates", template, () => setTemplate(null))
-                  }
-                >
-                  <Save size={16} /> Save Template
-                </button>
-              </div>
-            </div>
-          </Modal>
         )}
         {source && (
           <Modal
@@ -1625,23 +1374,19 @@ export function PipelineWorkspace({ page }: { page: Page }) {
               </label>
               <div className="pipe-field-grid">
                 <label>
-                  Contact List Template
+                  Genesys Contact List
                   <select
-                    value={mapping.templateId}
+                    value={mapping.contactListId}
                     onChange={(event) =>
-                      setMapping({
-                        ...mapping,
-                        templateId: event.target.value,
-                        fields: mappingFor(
-                          event.target.value,
-                          mapping.sourceId,
-                        ),
-                      })
+                      void chooseDestination(event.target.value)
                     }
                   >
-                    <option value="">Select template</option>
-                    {data.templates.map((item) => (
-                      <option key={item.id} value={item.id}>
+                    <option value="">Select Genesys Contact List</option>
+                    {data.contactLists.map((item) => (
+                      <option
+                        key={item.contactListId}
+                        value={item.contactListId}
+                      >
                         {item.name}
                       </option>
                     ))}
@@ -1657,7 +1402,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                         sourceId: event.target.value,
                         keyField: "",
                         fields: mappingFor(
-                          mapping.templateId,
+                          mapping.contactListId,
                           event.target.value,
                         ),
                       })
@@ -1697,7 +1442,10 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                   onClick={() =>
                     setMapping({
                       ...mapping,
-                      fields: mappingFor(mapping.templateId, mapping.sourceId),
+                      fields: mappingFor(
+                        mapping.contactListId,
+                        mapping.sourceId,
+                      ),
                     })
                   }
                 >
@@ -1708,13 +1456,13 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>Template field</th>
+                      <th>Genesys field</th>
                       <th>Source field</th>
                       <th>Default value</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedTemplate?.fields.map((field) => {
+                    {selectedDestination?.fields.map((field) => {
                       const current = mapping.fields.find(
                         (item) => item.targetField === field.name,
                       ) || {
@@ -1800,7 +1548,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                   disabled={
                     Boolean(busy) ||
                     !mapping.name.trim() ||
-                    !mapping.templateId ||
+                    !mapping.contactListId ||
                     !mapping.sourceId ||
                     !mapping.keyField
                   }
@@ -1877,7 +1625,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                           ...lead.filters,
                           {
                             scope: "TARGET",
-                            field: filterTemplate?.fields[0]?.name || "",
+                            field: filterDestination?.fields[0]?.name || "",
                             operator: "EQ",
                             value: "",
                           },
@@ -1913,7 +1661,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                           field:
                             event.target.value === "SOURCE"
                               ? filterSource?.fields[0] || ""
-                              : filterTemplate?.fields[0]?.name || "",
+                              : filterDestination?.fields[0]?.name || "",
                         })
                       }
                     >
@@ -1929,7 +1677,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                     >
                       {(filter.scope === "SOURCE"
                         ? filterSource?.fields
-                        : filterTemplate?.fields.map((field) => field.name)
+                        : filterDestination?.fields.map((field) => field.name)
                       )?.map((field) => (
                         <option key={field}>{field}</option>
                       ))}
@@ -2381,10 +2129,7 @@ function ManualImporter({
     setLeadId(id);
     const lead = data.leads.find((item) => item.id === id);
     const mapping = data.mappings.find((item) => item.id === lead?.mappingId);
-    const template = data.templates.find(
-      (item) => item.id === mapping?.templateId,
-    );
-    if (template?.contactListId) setListId(template.contactListId);
+    if (mapping?.contactListId) setListId(mapping.contactListId);
   }
   const active = starting || job?.status === "RUNNING";
   async function start(ids?: string[], confirmed = false) {
@@ -2474,7 +2219,7 @@ function ManualImporter({
               <select
                 aria-label="Genesys Contact List"
                 value={listId}
-                disabled={active}
+                disabled={active || Boolean(leadId)}
                 onChange={(event) => setListId(event.target.value)}
               >
                 <option value="">Select destination Contact List</option>
@@ -2582,7 +2327,7 @@ function ManualImporter({
             <Empty>
               {data.leads.length
                 ? "Select a Lead Configuration to preview your records."
-                : "Create a template, source mapping and lead configuration to get started."}
+                : "Configure a Genesys Contact List, source mapping and lead configuration to get started."}
             </Empty>
           ) : (
             <div className="pipe-table-scroll">

@@ -1,3 +1,8 @@
+import {
+  configuredContactList,
+  listConfiguredContactLists,
+  refreshContactLists,
+} from "./contact-list.service";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
@@ -6,12 +11,7 @@ import { JsonRepository, dataDir } from "../domain/json-repository";
 import { httpError } from "../domain/business";
 import { audit } from "../domain/store";
 import {
-  CONTACT_COLUMNS,
-  payloadHash,
-  type CampaignContact,
-} from "../domain/campaign-contact";
-import {
-  contactTemplates,
+  contactListConfigurations,
   sourceIntegrations,
   sourceMappings,
   leadDefinitions,
@@ -21,7 +21,7 @@ import {
 } from "../domain/pipeline-store";
 import type {
   Entity,
-  ContactTemplate,
+  ContactListConfiguration,
   SourceIntegration,
   SourceMapping,
   LeadDefinition,
@@ -34,6 +34,7 @@ import type {
 import { encryptSecret } from "./genesys/secret.service";
 import { genesysApiClient } from "./genesys/genesys-api.client";
 import { loadSource } from "./source-data.service";
+import { recordSourceObservation } from "./source-observation.service";
 
 const name = z.string().trim().min(1).max(120);
 const fieldName = z
@@ -46,27 +47,6 @@ const fieldName = z
       !["__proto__", "prototype", "constructor"].includes(value) &&
       !/[\x00-\x1f]/.test(value),
     "Invalid field name",
-  );
-export const templateInput = z
-  .object({
-    name,
-    contactListId: z.string().max(200).default(""),
-    fields: z
-      .array(
-        z.object({
-          name: fieldName,
-          type: z.enum(["STRING", "NUMBER", "DATE", "BOOLEAN", "PHONE"]),
-          required: z.boolean(),
-        }),
-      )
-      .min(1)
-      .max(200),
-  })
-  .refine(
-    (value) =>
-      new Set(value.fields.map((field) => field.name)).size ===
-      value.fields.length,
-    "Field names must be unique",
   );
 export const sourceInput = z.object({
   id: z.string().uuid().optional(),
@@ -103,7 +83,8 @@ export const sourceInput = z.object({
 });
 export const mappingInput = z.object({
   name,
-  templateId: z.string().uuid(),
+  contactListId: z.string().trim().min(1).max(200),
+  regionId: z.string().optional(),
   sourceId: z.string().uuid(),
   keyField: fieldName,
   fields: z
@@ -112,6 +93,10 @@ export const mappingInput = z.object({
         targetField: fieldName,
         sourceField: z.string().max(128),
         defaultValue: z.string().max(2000).default(""),
+        type: z
+          .enum(["STRING", "NUMBER", "DATE", "BOOLEAN", "PHONE"])
+          .optional(),
+        required: z.boolean().optional(),
       }),
     )
     .max(200),
@@ -193,9 +178,9 @@ export function publicSource(
   };
 }
 export async function bootstrapPipeline() {
-  const [templates, sources, mappings, leads, schedules, jobs] =
+  const [contactLists, sources, mappings, leads, schedules, jobs] =
     await Promise.all([
-      contactTemplates.all(),
+      listConfiguredContactLists(),
       sourceIntegrations.all(),
       sourceMappings.all(),
       leadDefinitions.all(),
@@ -203,7 +188,7 @@ export async function bootstrapPipeline() {
       importJobs.all(),
     ]);
   return {
-    templates,
+    contactLists,
     sources: sources.map((item) => publicSource(item)),
     mappings,
     leads,
@@ -241,7 +226,7 @@ export async function previewSource(
   connectOnly = false,
 ) {
   const source = await draftSource(input, id);
-  const data = await loadSource(source, connectOnly);
+  const data = await loadSource(source, connectOnly, false);
   return {
     ...data,
     rows: data.rows.slice(0, 100),
@@ -250,7 +235,7 @@ export async function previewSource(
 }
 export async function saveSource(input: unknown, actor: string, id?: string) {
   const source = await draftSource(input, id);
-  const preview = await loadSource(source);
+  const preview = await loadSource(source, false, false);
   if (!preview.fields.length)
     throw httpError(
       400,
@@ -290,22 +275,14 @@ export async function saveSource(input: unknown, actor: string, id?: string) {
     return item;
   });
   await audit("SAVE_SOURCE_INTEGRATION", actor, saved.id, { kind: saved.kind });
+  await recordSourceObservation(saved.id, "ACTIVE", "Source read successfully");
   return publicSource(saved);
 }
 
-export async function saveTemplate(input: unknown, actor: string, id?: string) {
-  const saved = await saveEntity(
-    contactTemplates,
-    templateInput.parse(input),
-    id,
-  );
-  await audit("SAVE_CONTACT_TEMPLATE", actor, saved.id);
-  return saved;
-}
 export async function saveMapping(input: unknown, actor: string, id?: string) {
   const data = mappingInput.parse(input);
-  const [template, source] = await Promise.all([
-    entity(contactTemplates, data.templateId),
+  const [destination, source] = await Promise.all([
+    configuredContactList(data.contactListId, true),
     entity(sourceIntegrations, data.sourceId),
   ]);
   if (!source.fields.includes(data.keyField))
@@ -320,12 +297,12 @@ export async function saveMapping(input: unknown, actor: string, id?: string) {
     throw httpError(400, "Each target field can be mapped only once");
   for (const field of data.fields) {
     if (
-      !template.fields.some((target) => target.name === field.targetField) ||
+      !destination.fields.some((target) => target.name === field.targetField) ||
       (field.sourceField && !source.fields.includes(field.sourceField))
     )
       throw httpError(400, "Mapping references an unknown field");
   }
-  for (const required of template.fields.filter((field) => field.required))
+  for (const required of destination.fields.filter((field) => field.required))
     if (
       !data.fields.some(
         (field) =>
@@ -334,15 +311,19 @@ export async function saveMapping(input: unknown, actor: string, id?: string) {
       )
     )
       throw httpError(400, `Map the required field ${required.name}`);
-  const saved = await saveEntity(sourceMappings, data, id);
+  const saved = await saveEntity(
+    sourceMappings,
+    { ...data, regionId: destination.regionId },
+    id,
+  );
   await audit("SAVE_SOURCE_MAPPING", actor, saved.id);
   return saved;
 }
 export async function saveLead(input: unknown, actor: string, id?: string) {
   const data = leadInput.parse(input);
   const mapping = await entity(sourceMappings, data.mappingId);
-  const [template, source] = await Promise.all([
-    entity(contactTemplates, mapping.templateId),
+  const [destination, source] = await Promise.all([
+    configuredContactList(mapping.contactListId),
     entity(sourceIntegrations, mapping.sourceId),
   ]);
   for (const filter of data.filters) {
@@ -350,7 +331,7 @@ export async function saveLead(input: unknown, actor: string, id?: string) {
       !(
         filter.scope === "SOURCE"
           ? source.fields
-          : template.fields.map((field) => field.name)
+          : destination.fields.map((field) => field.name)
       ).includes(filter.field)
     )
       throw httpError(400, "Filter references an unknown field");
@@ -373,13 +354,11 @@ export async function deleteConfiguration(
   actor: string,
 ) {
   const references =
-    kind === "templates"
-      ? (await sourceMappings.all()).some((row) => row.templateId === id)
-      : kind === "sources"
-        ? (await sourceMappings.all()).some((row) => row.sourceId === id)
-        : kind === "mappings"
-          ? (await leadDefinitions.all()).some((row) => row.mappingId === id)
-          : (await importSchedules.all()).some((row) => row.leadId === id);
+    kind === "sources"
+      ? (await sourceMappings.all()).some((row) => row.sourceId === id)
+      : kind === "mappings"
+        ? (await leadDefinitions.all()).some((row) => row.mappingId === id)
+        : (await importSchedules.all()).some((row) => row.leadId === id);
   if (references)
     throw httpError(
       409,
@@ -387,7 +366,6 @@ export async function deleteConfiguration(
     );
   const repository = (
     {
-      templates: contactTemplates,
       sources: sourceIntegrations,
       mappings: sourceMappings,
       leads: leadDefinitions,
@@ -402,56 +380,18 @@ export async function deleteConfiguration(
   await audit("DELETE_PIPELINE_CONFIGURATION", actor, id, { kind });
 }
 
-async function assertGenesysCredentials() {
-  const { GenesysConfigService } =
-    await import("./genesys/genesys-config.service");
-  const config = await new GenesysConfigService().getConfig();
-  if (!config.clientId || !config.clientSecretEncrypted)
-    throw httpError(
-      400,
-      "Configure Genesys OAuth credentials under Genesys Configuration first",
-    );
-}
 export async function contactLists() {
-  await assertGenesysCredentials();
-  const entities: { id: string; name: string }[] = [];
-  for (let page = 1; page <= 50; page++) {
-    const response = await genesysApiClient.get<{
-      entities?: { id: string; name: string }[];
-      pageCount?: number;
-      nextUri?: string;
-    }>(`/api/v2/outbound/contactlists?pageSize=100&pageNumber=${page}`);
-    entities.push(...(response.entities || []));
-    if (page >= (response.pageCount || 1) && !response.nextUri) break;
-    if (!(response.entities || []).length) break;
-  }
-  return entities;
+  return refreshContactLists();
 }
 export async function contactList(id: string) {
-  await assertGenesysCredentials();
-  z.string().uuid().parse(id);
-  return genesysApiClient.get<{
-    id: string;
-    name: string;
-    columnNames: string[];
-    phoneColumns?: { columnName: string }[];
-  }>(`/api/v2/outbound/contactlists/${encodeURIComponent(id)}`);
-}
-export async function fieldsFromGenesys(
-  id: string,
-): Promise<{ fields: ContactField[]; contactListId: string; name: string }> {
-  const list = await contactList(id);
-  const phones = new Set(
-    (list.phoneColumns || []).map((column) => column.columnName),
-  );
+  const destination = await configuredContactList(id, true);
   return {
-    name: list.name,
-    contactListId: id,
-    fields: (list.columnNames || []).map((name) => ({
-      name,
-      type: phones.has(name) ? "PHONE" : "STRING",
-      required: phones.has(name),
-    })),
+    id: destination.uuid,
+    name: destination.name,
+    columnNames: destination.fields.map((field) => field.name),
+    phoneColumns: destination.fields
+      .filter((field) => field.type === "PHONE")
+      .map((field) => ({ columnName: field.name })),
   };
 }
 
@@ -538,20 +478,36 @@ export async function resolveLead(
 ): Promise<LeadPreview> {
   const lead = await entity(leadDefinitions, id);
   const mapping = await entity(sourceMappings, lead.mappingId);
-  const [template, source, states] = await Promise.all([
-    entity(contactTemplates, mapping.templateId),
+  const [configured, source, states] = await Promise.all([
+    configuredContactList(mapping.contactListId),
     entity(sourceIntegrations, mapping.sourceId),
     importStates.all(),
   ]);
+  if (mapping.regionId && mapping.regionId !== configured.regionId)
+    throw httpError(
+      409,
+      "This mapping belongs to another Genesys region. Edit the mapping before importing.",
+    );
+  if (listId && listId !== mapping.contactListId)
+    throw httpError(
+      409,
+      "The destination must match the Genesys Contact List selected in this Source Mapping.",
+    );
+  listId = configured.uuid;
+  const destination = {
+    ...configured,
+    fields: configured.fields.map((field) => {
+      const mapped = mapping.fields.find(
+        (item) => item.targetField === field.name,
+      );
+      return {
+        ...field,
+        type: field.type === "PHONE" ? field.type : mapped?.type || field.type,
+        required: field.required || mapped?.required || false,
+      };
+    }),
+  };
   const loaded = await loadSource(source);
-  const legacyPolicies =
-    source.kind === "LEGACY"
-      ? new Map(
-          (await (await import("../domain/store")).policies.all()).map(
-            (policy) => [policy.policyId, policy],
-          ),
-        )
-      : null;
   const stateMap = new Map(states.map((state) => [state.id, state]));
   const keys = new Set<string>(),
     phones = new Set<string>();
@@ -561,7 +517,7 @@ export async function resolveLead(
     const sourceKey = rawKey.slice(0, 256);
     const data: Record<string, string> = Object.create(null);
     let message = "";
-    for (const field of template.fields) {
+    for (const field of destination.fields) {
       const configured = mapping.fields.find(
         (item) => item.targetField === field.name,
       );
@@ -605,11 +561,8 @@ export async function resolveLead(
     else if (["true", "1"].includes(String(raw.dnc ?? "").toLowerCase())) {
       status = "DNC";
       message = "Source record is marked Do Not Call";
-    } else if (source.kind === "LEGACY" && raw.legacyEligible === false) {
-      status = "INVALID";
-      message = "Excluded by the original campaign eligibility rules";
     }
-    const phone = template.fields
+    const phone = destination.fields
       .filter((field) => field.type === "PHONE")
       .map((field) => data[field.name])
       .find(Boolean);
@@ -620,34 +573,11 @@ export async function resolveLead(
     if (sourceKey) keys.add(sourceKey);
     if (phone) phones.add(phone);
     const rowId = stateKey(
-      source.kind === "LEGACY" ? "legacy-policy" : mapping.id,
+      source.identityNamespace || mapping.id,
       sourceKey,
       listId,
     );
-    const legacyPolicy = legacyPolicies?.get(sourceKey);
-    const legacyContact =
-      legacyPolicy?.genesys.contactListId === listId &&
-      legacyPolicy.genesys.contactId
-        ? legacyPolicy.genesys
-        : undefined;
-    const legacyHash = payloadHash(
-      Object.fromEntries(
-        CONTACT_COLUMNS.map((field) => [field, data[field] || ""]),
-      ) as CampaignContact,
-    );
-    const state =
-      stateMap.get(rowId) ||
-      (legacyContact
-        ? {
-            status: legacyContact.syncStatus === "SYNCED" ? "SYNCED" : "FAILED",
-            payloadHash:
-              legacyContact.lastPayloadHash === legacyHash
-                ? contactHash(data)
-                : "legacy-outdated",
-            contactId: legacyContact.contactId,
-            message: "",
-          }
-        : undefined);
+    const state = stateMap.get(rowId);
     if (status === "ELIGIBLE" && state) {
       if (["UNKNOWN", "PENDING"].includes(state.status)) {
         status = "UNKNOWN";
@@ -672,11 +602,10 @@ export async function resolveLead(
     });
   }
   return {
-    legacySource: source.kind === "LEGACY",
     lead,
     mapping,
-    template,
-    fields: template.fields.map((field) => field.name),
+    destination,
+    fields: destination.fields.map((field) => field.name),
     rows,
     total: rows.length,
     sourceTotal: loaded.total,
@@ -684,7 +613,11 @@ export async function resolveLead(
     revision: digest([
       lead,
       mapping,
-      template,
+      {
+        contactListId: destination.contactListId,
+        uuid: destination.uuid,
+        fields: destination.fields,
+      },
       rows.map((row) => [row.sourceKey, row.data]),
     ]),
     summary: {

@@ -2,13 +2,13 @@
 
 The workspace runs at https://mfecleadsync.demohub24.com/. Administration still requires the existing administrator account. Configuration and source credentials remain server-side; database passwords and Web Service tokens are encrypted with APP_SECRET.
 
-## 1. Contact List Template
+## 1. Genesys Configuration and Contact Lists
 
-Open **Contact List Template**, create a named template and add fields. Field types are String, Number, Date, Boolean and Phone; required fields must be mapped or given a default value.
+The second navigation group contains **Region Management**, **Integration Setting**, and **Contact List Configuration**, in that order. Integration Setting retains region selection and OAuth credentials, with read-only endpoint values and only **Test Connection** / **Save Configuration** actions.
 
-Alternatively, select a Genesys Contact List and click **Import fields**. The application reads its exact column names and phone columns and fills the open editor. This does not save the template. Review the name, types and required flags, then click **Save Template**. Changes are discarded if the editor is cancelled.
+Open **Contact List Configuration** to retrieve all Contact Lists from the active Genesys connection. Genesys Outbound addresses a list as `/api/v2/outbound/contactlists/{contactListId}/contacts`; a valid UUID returned as the Contact List ID is saved automatically. No destination UUID is generated. Refresh fills only missing UUIDs and never replaces an existing UUID. Manual changes require confirmation, are checked against Genesys, and reject stale concurrent edits or another list's ID.
 
-Templates used for an import must match the selected Genesys Contact List's columns. The import path supports custom schemas and does not require the legacy insurance application's 23 columns.
+The table shows list name, Contact List ID, UUID, status and Edit/Save actions. A list without a UUID or no longer available cannot be used for mapping/import. Columns and required phone columns come directly from Genesys; there are no local Contact List Templates.
 
 ## 2. Source Configuration
 
@@ -27,7 +27,7 @@ Loopback Web Service hosts require an explicit `SOURCE_ALLOWED_HOSTS` environmen
 
 ### Source Mapping
 
-Select a Contact List Template and Source Integration, give the mapping a name, and select a **stable, unique record key** from the source. Map each target field to a source field or a default value. Auto-match fills fields whose names are identical; it does not save the mapping.
+Select a Genesys Contact List and Source Integration, give the mapping a name, and select a **stable, unique record key** from the source. Map each target field to a source field or a default value. Auto-match fills fields whose names are identical; it does not save the mapping.
 
 The record key must identify the same source record on future runs. Record keys are limited to 256 characters and mapped field values to 4,000 characters. Do not use a row number that changes between requests.
 
@@ -37,17 +37,17 @@ Give the lead a name and select a Source Mapping. Filters can use mapped fields 
 
 Date offsets use calendar days in **Asia/Bangkok**. Positive values are future days, negative values are past days. For example, `Date < -30` selects dates older than 30 days; `Date > 0` plus `Date < 30` selects dates after today and before 30 days from today. Invalid/empty numeric or date values do not pass numeric/date comparisons.
 
-## 4. Genesys Configuration
+## 4. Dashboard System Status
 
-**Integration settings** and **Region management** retain the existing connection/region functions under the Genesys Configuration menu. OAuth credentials are reused. Contact List validation checks the destination's fields and phone configuration; the selected Template is validated against the actual destination again when importing.
+**Refresh status** performs actual Genesys and datasource read checks. The table shows each datasource's connection result, latest import result and time in Bangkok. Before a real check/import, the screen displays Not checked / Not run. It never substitutes demonstration status. Cached status updates every 15 seconds; live checks require the refresh button. Green means success/active, yellow means unchecked/disconnected/in progress, and red means a failed check/import. Imported rows and source credentials are not exposed in status responses.
 
 ## 5. Lead Importer
 
 ### Manual Import
 
-Select a Lead Configuration to load current data automatically. Choose a Genesys Contact List. Import individual records, selected records across pages, or every eligible record. Export CSV is also available.
+Select a Lead Configuration to load current data automatically. The destination is the Contact List configured in its Source Mapping. Import individual records, selected records across pages, or every eligible record. Export CSV is also available.
 
-The importer validates required fields, field types, phone numbers, duplicate keys/phones and source DNC flags. Unchanged contacts are skipped. Changed contacts retain their remote Contact ID and are updated while preserving unrelated Genesys contact properties. The destination selection is per import and does not change global configuration.
+The importer validates required fields, field types, phone numbers, duplicate keys/phones and source DNC flags. Unchanged contacts are skipped. Changed contacts retain their remote Contact ID and are updated while preserving unrelated Genesys contact properties. A conflicting destination is rejected to protect the mapping.
 
 Import jobs run in the background and show progress. Recent history retains 100 jobs and the latest 200 per-record results in each job. A durable contact-identity journal is synchronized before creating remote contacts. Unknown creation outcomes are not automatically retried; after checking the destination, use **Reconcile** to link the existing Genesys Contact ID. Only one import/clear operation runs at a time; individual contacts are processed with bounded concurrency.
 
@@ -55,7 +55,7 @@ Import jobs run in the background and show progress. Recent history retains 100 
 
 ### Schedule Import
 
-Choose a Lead Configuration and destination Contact List. Configure daily, weekly, monthly or selected dates such as 1 and 15 of every month, choose the Bangkok time and enable the schedule. Each run fetches fresh data and re-evaluates its filters. Monthly dates that do not exist, such as February 31, are skipped. Missed periods are not replayed as duplicate historical imports.
+Choose a Lead Configuration and its matching destination Contact List. Configure daily, weekly, monthly or selected dates such as 1 and 15 of every month, choose the Bangkok time and enable the schedule. Each run fetches fresh data and re-evaluates its filters. Monthly dates that do not exist, such as February 31, are skipped. Missed periods are not replayed as duplicate historical imports.
 
 Schedules can be edited, paused, enabled, run immediately and deleted. Results and next run times are visible in the schedule table. Run exactly one scheduler instance per DATA_DIR.
 

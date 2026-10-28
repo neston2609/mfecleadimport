@@ -86,45 +86,15 @@ async function launch() {
 }
 
 test(
-  "genesys runs independently with isolated authentication, records, backups and routes",
+  "standalone APIs preserve authentication, remove obsolete features and report actual source status",
   { timeout: 30000 },
   async () => {
-    const { folder, request, stop } = await launch();
+    const { request, stop } = await launch();
     try {
-      assert.equal(
-        (await (await request("/api/health")).json()).service,
-        "mfec-lead-import-export",
-      );
-      const homepage = await request("/");
-      assert.equal(homepage.status, 200);
-      assert.equal(homepage.headers.get("location"), null);
-      assert.match(await homepage.text(), /MFEC LeadSync/);
-      for (const [oldPath, newPath] of [
-        ["/genesys", "/"],
-        ["/genesys/", "/"],
-        ["/genesys/import-leads?campaign=demo", "/import-leads?campaign=demo"],
-        ["/genesys/customers/CUST00001", "/customers/CUST00001"],
-        ["/genesys/login?passwordChanged=1", "/login?passwordChanged=1"],
-      ]) {
-        const legacy = await request(oldPath);
-        assert.equal(legacy.status, 308, oldPath);
-        assert.equal(legacy.headers.get("location"), newPath, oldPath);
-      }
-      assert.equal((await request("/manage")).status, 404);
-      assert.equal((await request("/api/admin/customers")).status, 401);
+      assert.equal((await request("/api/health")).status, 200);
       assert.equal(
         (await request("/api/admin/pipeline/bootstrap")).status,
         401,
-      );
-      assert.equal(
-        (
-          await request("/api/admin/auth/login", "POST", {
-            username: "admin",
-            password: "TestPassword123!",
-            portal: "manage",
-          })
-        ).status,
-        400,
       );
       const login = await request("/api/admin/auth/login", "POST", {
         username: "admin",
@@ -132,307 +102,123 @@ test(
         portal: "genesys",
       });
       assert.equal(login.status, 200);
-      const setCookie = login.headers.get("set-cookie")!;
-      assert.match(setCookie, /^genesys\.sid=/);
-      assert.match(setCookie, /HttpOnly/);
-      assert.match(setCookie, /Secure/);
-      const cookie = setCookie.split(";")[0];
-      const initialPipeline = await (
+      const cookie = login.headers.get("set-cookie")!.split(";")[0];
+      for (const url of [
+        "/api/admin/campaigns",
+        "/api/admin/customers",
+        "/api/admin/pipeline/templates",
+        "/api/admin/genesys/schedules",
+      ]) {
+        assert.equal(
+          (await request(url, "GET", undefined, cookie)).status,
+          404,
+          url,
+        );
+      }
+      for (const url of ["/templates", "/campaigns", "/customers", "/manage"]) {
+        assert.equal((await request(url)).status, 404, url);
+      }
+      const initial = await (
         await request("/api/admin/pipeline/bootstrap", "GET", undefined, cookie)
       ).json();
-      assert.ok(
-        initialPipeline.leads.length >= 6,
-        "Legacy campaign leads must be retained",
-      );
-      assert.ok(
-        initialPipeline.sources.every(
-          (source: Record<string, unknown>) =>
-            source.secretEncrypted === undefined,
-        ),
-      );
-      const template = await (
-        await request(
-          "/api/admin/pipeline/templates",
-          "POST",
-          {
-            name: "API custom fields",
-            contactListId: "",
-            fields: [
-              { name: "id", type: "STRING", required: true },
-              { name: "phone", type: "PHONE", required: true },
-              { name: "amount", type: "NUMBER", required: false },
-            ],
-          },
-          cookie,
-        )
+      assert.equal(initial.templates, undefined);
+      assert.deepEqual(initial.sources, []);
+      let status = await (
+        await request("/api/admin/pipeline/status", "GET", undefined, cookie)
       ).json();
-      assert.ok(template.id);
-      const sourceDraft = {
-        name: "API JSON source",
-        kind: "JSON",
+      assert.equal(status.integration.status, "DISCONNECTED");
+      assert.deepEqual(status.sources, []);
+      const draft = {
+        name: "Uploaded customers",
+        kind: "CSV",
         config: {
-          fileName: "fixture.json",
-          content: JSON.stringify([
-            { id: "one", phone: "0812345678", amount: 500 },
-            { id: "two", phone: "0822345678", amount: 5 },
-          ]),
+          fileName: "customers.csv",
+          content: "id,phone\n1,0812345678\n",
         },
       };
-      const sourcePreview = await request(
-        "/api/admin/pipeline/sources/preview",
-        "POST",
-        { source: sourceDraft },
-        cookie,
-      );
-      assert.equal(sourcePreview.status, 200);
-      assert.equal((await sourcePreview.json()).rows.length, 2);
-      const afterPreview = await (
-        await request("/api/admin/pipeline/bootstrap", "GET", undefined, cookie)
-      ).json();
-      assert.equal(
-        afterPreview.sources.length,
-        initialPipeline.sources.length,
-        "Preview must not save a source",
-      );
-      const source = await (
-        await request(
-          "/api/admin/pipeline/sources",
-          "POST",
-          sourceDraft,
-          cookie,
-        )
-      ).json();
-      assert.ok(source.id);
-      const mapping = await (
-        await request(
-          "/api/admin/pipeline/mappings",
-          "POST",
-          {
-            name: "API mapping",
-            templateId: template.id,
-            sourceId: source.id,
-            keyField: "id",
-            fields: ["id", "phone", "amount"].map((name) => ({
-              targetField: name,
-              sourceField: name,
-              defaultValue: "",
-            })),
-          },
-          cookie,
-        )
-      ).json();
-      assert.ok(mapping.id);
-      const lead = await (
-        await request(
-          "/api/admin/pipeline/leads",
-          "POST",
-          {
-            name: "API filtered lead",
-            mappingId: mapping.id,
-            match: "ALL",
-            filters: [
-              { field: "amount", scope: "TARGET", operator: "GT", value: "10" },
-            ],
-          },
-          cookie,
-        )
-      ).json();
-      assert.ok(lead.id);
-      const previewLead = await (
-        await request(
-          `/api/admin/pipeline/leads/${lead.id}/preview`,
-          "GET",
-          undefined,
-          cookie,
-        )
-      ).json();
-      assert.equal(previewLead.summary.eligible, 1);
-      assert.equal(previewLead.rows[0].data.phone, "+66812345678");
       assert.equal(
         (
           await request(
-            `/api/admin/pipeline/sources/${source.id}`,
-            "DELETE",
-            undefined,
-            cookie,
-          )
-        ).status,
-        409,
-      );
-      assert.equal(
-        (
-          await request(
-            `/api/admin/pipeline/leads/${lead.id}/export`,
-            "GET",
-            undefined,
+            "/api/admin/pipeline/sources/preview",
+            "POST",
+            { source: draft },
             cookie,
           )
         ).status,
         200,
       );
-      const newSchedule = await request(
-        "/api/admin/pipeline/schedules",
+      assert.equal(
+        (
+          await (
+            await request(
+              "/api/admin/pipeline/bootstrap",
+              "GET",
+              undefined,
+              cookie,
+            )
+          ).json()
+        ).sources.length,
+        0,
+      );
+      const saved = await request(
+        "/api/admin/pipeline/sources",
+        "POST",
+        draft,
+        cookie,
+      );
+      assert.equal(saved.status, 201);
+      const source = await saved.json();
+      status = await (
+        await request("/api/admin/pipeline/status/refresh", "POST", {}, cookie)
+      ).json();
+      assert.equal(status.sources[0].status, "ACTIVE");
+      assert.equal(status.sources[0].lastSyncStatus, null);
+      assert.equal(status.sources[0].lastSyncTime, null);
+      assert.ok(status.sources[0].checkedAt);
+      const missing = await request(
+        "/api/admin/pipeline/mappings",
         "POST",
         {
-          name: "API monthly import",
-          leadId: lead.id,
+          name: "Missing UUID",
+          sourceId: source.id,
           contactListId: "11111111-1111-4111-8111-111111111111",
-          frequency: "MONTH_DAYS",
-          time: "10:30",
-          monthDays: [1, 15],
-          enabled: false,
+          keyField: "id",
+          fields: [
+            { sourceField: "phone", targetField: "phone", defaultValue: "" },
+          ],
         },
         cookie,
       );
-      assert.equal(newSchedule.status, 201);
-      assert.equal(
-        (
-          await (
-            await request(
-              "/api/admin/auth/session?portal=genesys",
-              "GET",
-              undefined,
-              cookie,
-            )
-          ).json()
-        ).authenticated,
-        true,
-      );
+      assert.equal(missing.status, 409);
+      assert.match((await missing.json()).message, /UUID/);
       assert.equal(
         (
           await request(
-            "/api/admin/customers",
-            "GET",
-            undefined,
-            cookie.replace("genesys.sid", "manage.sid"),
-          )
-        ).status,
-        401,
-      );
-      assert.equal(
-        (
-          await request(
-            "/api/admin/customers/CUST00001",
-            "PUT",
-            { firstName: "Blocked" },
-            cookie,
-            { Origin: "https://unrelated.example" },
-          )
-        ).status,
-        403,
-      );
-      assert.equal(
-        (
-          await request(
-            "/api/admin/customers/CUST00001",
-            "PUT",
-            { firstName: "Standalone" },
+            "/api/admin/pipeline/sources",
+            "POST",
+            { ...draft, name: "Old", kind: "LEGACY" },
             cookie,
           )
         ).status,
-        200,
+        400,
       );
-      assert.equal(
-        (
-          await (
-            await request(
-              "/api/admin/customers/CUST00001",
-              "GET",
-              undefined,
-              cookie,
-            )
-          ).json()
-        ).firstName,
-        "Standalone",
-      );
-      const saved = JSON.parse(
-        await readFile(path.join(folder, "data/customers.json"), "utf8"),
-      );
-      assert.ok(
-        saved.some(
-          (row: { firstName: string }) => row.firstName === "Standalone",
-        ),
-      );
-      const campaignResponse = await request(
-        "/api/admin/campaigns",
-        "POST",
-        {
-          name: "Independent campaign",
-          description: "Local source",
-          filters: { excludeDnc: true },
-        },
-        cookie,
-      );
-      assert.equal(campaignResponse.status, 201);
-      const campaign = await campaignResponse.json();
-      const preview = await (
-        await request(
-          "/api/admin/campaigns/" + campaign.campaignListId + "/preview",
-          "POST",
-          {},
-          cookie,
-        )
+      const backup = await (
+        await request("/api/admin/settings/backup", "POST", {}, cookie)
       ).json();
-      assert.ok(preview.summary.eligible > 0);
-      const exported = await request(
-        "/api/admin/campaigns/" + campaign.campaignListId + "/export",
-        "POST",
-        {},
-        cookie,
-      );
-      assert.equal(exported.status, 200);
-      assert.match(exported.headers.get("content-type") || "", /csv/);
-      assert.ok((await exported.text()).includes("customerId"));
-      const backupResponse = await request(
-        "/api/admin/settings/backup",
-        "POST",
-        {},
-        cookie,
-      );
-      assert.equal(backupResponse.status, 201);
-      const backup = await backupResponse.json();
       const download = await (
         await request(backup.downloadUrl, "GET", undefined, cookie)
       ).json();
-      assert.ok(download.files["customers.json"]);
+      assert.ok(download.files["source-integrations.json"]);
       assert.equal(download.files[".auth/admin.json"], undefined);
-
-      assert.equal((await request("/api/public/products")).status, 404);
-      assert.equal(
-        (await request("/api/admin/genesys/config", "GET", undefined, cookie))
-          .status,
-        200,
-      );
-      const regions = await (
-        await request("/api/admin/genesys/regions", "GET", undefined, cookie)
-      ).json();
-      assert.ok(regions.regions.length > 10);
-      const scheduleResponse = await request(
-        "/api/admin/genesys/schedules",
-        "POST",
-        {
-          name: "Local schedule",
-          campaignListId: campaign.campaignListId,
-          frequency: "DAILY",
-          time: "09:00",
-          enabled: false,
-        },
-        cookie,
-      );
-      assert.equal(scheduleResponse.status, 201);
       assert.equal(
         (
-          await request(
-            "/api/admin/campaigns/" + campaign.campaignListId,
-            "DELETE",
-            undefined,
-            cookie,
-          )
+          await request("/api/admin/pipeline/sources", "POST", draft, cookie, {
+            Origin: "https://unrelated.example",
+          })
         ).status,
-        409,
+        403,
       );
-
-      const passwordResponse = await request(
+      const changed = await request(
         "/api/admin/auth/change-password",
         "POST",
         {
@@ -442,29 +228,18 @@ test(
         },
         cookie,
       );
-      assert.equal(passwordResponse.status, 204);
-      assert.match(
-        passwordResponse.headers.get("set-cookie") || "",
-        /^genesys\.sid=/,
-      );
+      assert.equal(changed.status, 204);
       assert.equal(
-        (await request("/api/admin/customers", "GET", undefined, cookie))
-          .status,
+        (
+          await request(
+            "/api/admin/pipeline/bootstrap",
+            "GET",
+            undefined,
+            cookie,
+          )
+        ).status,
         401,
       );
-      for (const url of [
-        "/",
-        "/login",
-        "/import-leads",
-        "/regions",
-        "/scheduler",
-        "/customers",
-        "/customers/CUST00001",
-        "/policies/POL00001",
-        "/campaigns",
-        "/settings",
-      ])
-        assert.equal((await request(url)).status, 200, url);
     } finally {
       await stop();
     }

@@ -1,12 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { importJobs, importStates } from "../domain/pipeline-store";
 import { httpError } from "../domain/business";
-import { audit, policies } from "../domain/store";
-import {
-  CONTACT_COLUMNS,
-  payloadHash,
-  type CampaignContact,
-} from "../domain/campaign-contact";
+import { audit } from "../domain/store";
 import type {
   ImportJob,
   ImportState,
@@ -19,7 +14,6 @@ import {
   GenesysApiError,
 } from "./genesys/genesys-api.client";
 import { GenesysConfigService } from "./genesys/genesys-config.service";
-import { clearGenesysContactList } from "./genesys/genesys-sync.service";
 
 let activeJob = "";
 const running = new Map<string, Promise<void>>();
@@ -38,10 +32,14 @@ export async function exclusiveDestinationAction<T>(
 }
 export async function clearLeadDestination(id: string, actor: string) {
   return exclusiveDestinationAction(async () => {
-    const result = await clearGenesysContactList(id, actor);
+    const destination = await contactList(id);
+    const result = await genesysApiClient.post<Record<string, unknown>>(
+      `/api/v2/outbound/contactlists/${destination.id}/clear`,
+      {},
+    );
     await importStates.mutate((rows) => {
       for (let index = rows.length - 1; index >= 0; index--)
-        if (rows[index].contactListId === id) rows.splice(index, 1);
+        if (rows[index].contactListId === destination.id) rows.splice(index, 1);
     });
     return {
       ...result,
@@ -121,27 +119,6 @@ async function syncRow(
     state.message = updating ? "Contact updated" : "Contact created";
     state.updatedAt = new Date().toISOString();
     await writeState(state);
-    if (preview.legacySource) {
-      const hash = payloadHash(
-        Object.fromEntries(
-          CONTACT_COLUMNS.map((field) => [field, row.data[field] || ""]),
-        ) as CampaignContact,
-      );
-      await policies.mutate((rows) => {
-        const policy = rows.find((item) => item.policyId === row.sourceKey);
-        if (policy)
-          policy.genesys = {
-            ...policy.genesys,
-            contactListId: destination.id,
-            contactId: state.contactId,
-            syncStatus: "SYNCED",
-            lastPayloadHash: hash,
-            lastSyncAt: state.updatedAt,
-            lastSyncError: null,
-            lastSyncedBy: actor,
-          };
-      });
-    }
     return updating ? "UPDATED" : "CREATED";
   } catch (error) {
     const rejected =
@@ -274,7 +251,7 @@ export async function startImport(
         "Source data or configuration changed. Refresh the preview before importing.",
       );
     const templateFields = new Set(
-      preview.template.fields.map((field) => field.name),
+      preview.destination.fields.map((field) => field.name),
     );
     if (
       !destination.columnNames?.length ||
@@ -283,7 +260,7 @@ export async function startImport(
     )
       throw httpError(
         400,
-        "Template fields must exactly match the selected Genesys Contact List. Import its fields into the template and review the mapping.",
+        "Mapping fields no longer match the Genesys Contact List. Refresh Contact List Configuration and edit this mapping.",
       );
     const phoneColumns = destination.phoneColumns || [];
     if (!phoneColumns.length)
@@ -322,6 +299,7 @@ export async function startImport(
       id: randomUUID(),
       leadId: preview.lead.id,
       leadName: preview.lead.name,
+      sourceId: preview.mapping.sourceId,
       contactListId: input.contactListId,
       scheduleId,
       status: "RUNNING",

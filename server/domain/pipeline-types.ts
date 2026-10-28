@@ -6,11 +6,15 @@ export type Entity = {
   createdAt: string;
   updatedAt: string;
 };
-export type ContactTemplate = Entity & {
+export type ContactListConfiguration = Entity & {
   fields: ContactField[];
   contactListId: string;
+  regionId: string;
+  uuid: string;
+  uuidSource: "CONTACT_LIST_ID" | "MANUAL" | "";
+  missing: boolean;
 };
-export type SourceKind = "JDBC" | "WEB" | "CSV" | "JSON" | "LEGACY";
+export type SourceKind = "JDBC" | "WEB" | "CSV" | "JSON";
 export type SourceConfig = {
   jdbcUrl?: string;
   driverClass?: string;
@@ -27,7 +31,6 @@ export type SourceConfig = {
   fileName?: string;
   fileId?: string;
   delimiter?: string;
-  campaignListId?: string;
 };
 export type SourceIntegration = Entity & {
   kind: SourceKind;
@@ -35,12 +38,20 @@ export type SourceIntegration = Entity & {
   fields: string[];
   secretEncrypted: string;
   secretConfigured?: boolean;
+  identityNamespace?: string;
 };
 export type SourceMapping = Entity & {
-  templateId: string;
+  contactListId: string;
+  regionId: string;
   sourceId: string;
   keyField: string;
-  fields: { targetField: string; sourceField: string; defaultValue: string }[];
+  fields: {
+    targetField: string;
+    sourceField: string;
+    defaultValue: string;
+    type?: FieldType;
+    required?: boolean;
+  }[];
 };
 export type FilterOperator =
   | "EQ"
@@ -99,10 +110,9 @@ export type LeadRow = {
   contactId: string;
 };
 export type LeadPreview = {
-  legacySource?: boolean;
   lead: LeadDefinition;
   mapping: SourceMapping;
-  template: ContactTemplate;
+  destination: ContactListConfiguration;
   fields: string[];
   rows: LeadRow[];
   total: number;
@@ -120,6 +130,7 @@ export type ImportJob = {
   id: string;
   leadId: string;
   leadName: string;
+  sourceId?: string;
   contactListId: string;
   scheduleId: string;
   status: "RUNNING" | "SUCCESS" | "PARTIAL" | "FAILED" | "INTERRUPTED";
@@ -133,6 +144,12 @@ export type ImportJob = {
   results: { id: string; sourceKey: string; status: string; message: string }[];
   createdAt: string;
   finishedAt: string;
+};
+export type SourceObservation = {
+  id: string;
+  status: "ACTIVE" | "INACTIVE" | "ERROR";
+  checkedAt: string;
+  message: string;
 };
 export type ImportSchedule = Entity & {
   leadId: string;

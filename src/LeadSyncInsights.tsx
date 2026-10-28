@@ -128,54 +128,6 @@ export function LeadSyncInsights({
   });
   return (
     <aside className="ls-insights">
-      <section className="ls-insight-card">
-        <h2>
-          <GitFork size={21} />
-          Integration Pipeline
-        </h2>
-        <div className="ls-pipeline-steps">
-          {[
-            {
-              title: "Data Sources",
-              hint: "Multiple sources (DB, API, CSV, JSON)",
-              icon: Database,
-              ready: data.sources.length > 0,
-              href: "/sources",
-            },
-            {
-              title: "Lead Mapping & Filters",
-              hint: "Map fields and apply filters",
-              icon: Settings,
-              ready: data.mappings.length > 0 && data.leads.length > 0,
-              href: "/mappings",
-            },
-            {
-              title: "Genesys Cloud",
-              hint: contactLists
-                ? `${contactLists} contact lists available`
-                : "Configure your Genesys connection",
-              icon: CloudUpload,
-              ready: contactLists > 0,
-              href: "/integration",
-            },
-          ].map(({ title, hint, icon: Icon, ready, href }) => (
-            <a className="ls-pipeline-step" href={href} key={title}>
-              <span className="ls-step-icon">
-                <Icon size={25} />
-              </span>
-              <div>
-                <strong>{title}</strong>
-                <small>{hint}</small>
-              </div>
-              {ready ? (
-                <CheckCircle2 className="ls-ready-check" size={18} />
-              ) : (
-                <span className="ls-step-pending">Pending</span>
-              )}
-            </a>
-          ))}
-        </div>
-      </section>
       <section className="ls-insight-card" id="recent-imports">
         <h2>
           <Clock3 size={20} />

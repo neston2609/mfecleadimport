@@ -1,7 +1,8 @@
 import { JsonRepository } from "./json-repository";
 import { ImportStateRepository } from "./import-state-repository";
 import type {
-  ContactTemplate,
+  ContactListConfiguration,
+  SourceObservation,
   SourceIntegration,
   SourceMapping,
   LeadDefinition,
@@ -10,8 +11,13 @@ import type {
   ImportJob,
 } from "./pipeline-types";
 
-export const contactTemplates = new JsonRepository<ContactTemplate>(
-  "contact-templates.json",
+export const contactListConfigurations =
+  new JsonRepository<ContactListConfiguration>(
+    "genesys-contact-list-configurations.json",
+    () => [],
+  );
+export const sourceObservations = new JsonRepository<SourceObservation>(
+  "source-observations.json",
   () => [],
 );
 export const sourceIntegrations = new JsonRepository<SourceIntegration>(
@@ -36,7 +42,8 @@ export const importJobs = new JsonRepository<ImportJob>(
   () => [],
 );
 export const pipelineRepositories = [
-  contactTemplates,
+  contactListConfigurations,
+  sourceObservations,
   sourceIntegrations,
   sourceMappings,
   leadDefinitions,

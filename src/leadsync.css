@@ -5,7 +5,7 @@
   --muted: #647699;
   --line: #e0e9f6;
   --surface: #f1f7ff;
-  font-family: Inter, Prompt, Arial, sans-serif;
+  font-family: "Century Gothic", Prompt, Arial, sans-serif;
   color: var(--ink);
 }
 body {
@@ -251,7 +251,7 @@ button:disabled {
   grid-template-rows: 64px minmax(0, 1fr);
   min-height: 100svh;
   background: #f0f7ff;
-  font-family: Inter, Prompt, Arial, sans-serif;
+  font-family: "Century Gothic", Prompt, Arial, sans-serif;
 }
 .ls-topbar {
   position: sticky;
@@ -1720,5 +1720,133 @@ button:disabled {
 @media (min-width: 1251px) {
   .ls-login-form-wrap {
     top: 14px;
+  }
+}
+
+/* Live operational status and Genesys configuration share theme tokens. */
+.ls-system-status {
+  margin-bottom: 20px;
+}
+.ls-system-status h2 {
+  margin: 0 0 5px;
+}
+.ls-system-status .pipe-section-head {
+  align-items: center;
+  gap: 15px;
+}
+.ls-system-connection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  padding: 20px;
+  margin: 18px 0;
+  border: 1px solid var(--ls-border);
+  border-radius: 12px;
+  background: var(--ls-raised);
+  color: var(--ls-text);
+}
+.ls-system-connection > svg {
+  color: var(--ls-blue);
+}
+.ls-system-connection > div {
+  flex: 1;
+  min-width: 210px;
+}
+.ls-system-status small,
+.ls-system-connection small,
+.ls-region-values dt,
+.admin-table td > small {
+  display: block;
+  margin-top: 5px;
+  color: var(--ls-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.ls-system-status td {
+  max-width: 280px;
+  vertical-align: top;
+}
+.ls-system-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+.ls-system-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ls-system-pill.normal {
+  color: #087944;
+  background: #e1f8eb;
+}
+.ls-system-pill.warning {
+  color: #8a5904;
+  background: #fff3d2;
+}
+.ls-system-pill.error {
+  color: #b12a35;
+  background: #ffe6e9;
+}
+:root[data-theme="dark"] .ls-system-pill.normal {
+  color: #7fe5ac;
+  background: #133e30;
+}
+:root[data-theme="dark"] .ls-system-pill.warning {
+  color: #f4d277;
+  background: #40351a;
+}
+:root[data-theme="dark"] .ls-system-pill.error {
+  color: #ffacb4;
+  background: #4a2632;
+}
+.ls-region-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  border: 1px solid var(--ls-border);
+  border-radius: 12px;
+  padding: 18px;
+  background: var(--ls-raised);
+}
+.ls-region-values dd {
+  margin: 5px 0 0;
+  color: var(--ls-text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ls-uuid-confirm {
+  width: min(540px, calc(100vw - 32px));
+  background: var(--ls-panel);
+  color: var(--ls-text);
+}
+.ls-uuid-confirm code {
+  overflow-wrap: anywhere;
+  color: var(--ls-blue);
+}
+.ls-uuid-confirm .pipe-form-actions {
+  margin-top: 24px;
+}
+@media (min-width: 701px) and (max-width: 1250px) {
+  .ls-insights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .ls-region-values {
+    grid-template-columns: 1fr;
+  }
+  .ls-system-status .pipe-section-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
