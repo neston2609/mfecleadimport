@@ -48,6 +48,7 @@ import type {
 } from "../server/domain/types";
 
 import { App as GenesysSettings } from "./App";
+import { PipelineWorkspace } from "./PipelineWorkspace";
 
 type Page<T> = { items: T[]; total: number; page: number; pageSize: number };
 
@@ -157,11 +158,50 @@ const statusLabels: Record<string, string> = {
   OTHER: "Other",
 };
 
-const genesysNav = [
-  { key: "integration", label: "Integration", icon: ShieldCheck },
-  { key: "import-leads", label: "Import Lead Contact", icon: ListPlus },
-  { key: "regions", label: "Regions", icon: Globe2 },
-  { key: "scheduler", label: "Scheduler", icon: Clock3 },
+const navigationGroups = [
+  {
+    label: "",
+    items: [
+      { key: "overview", label: "Overview", icon: Globe2 },
+      { key: "templates", label: "Contact List Template", icon: FileText },
+    ],
+  },
+  {
+    label: "Source Configuration",
+    items: [
+      { key: "sources", label: "Source Integration", icon: DatabaseBackup },
+      { key: "mappings", label: "Source Mapping", icon: Filter },
+    ],
+  },
+  {
+    label: "",
+    items: [{ key: "leads", label: "Lead Configuration", icon: Users }],
+  },
+  {
+    label: "Genesys Configuration",
+    items: [
+      { key: "integration", label: "Integration settings", icon: ShieldCheck },
+      { key: "regions", label: "Region management", icon: Globe2 },
+    ],
+  },
+  {
+    label: "Lead Importer",
+    items: [
+      { key: "manual-import", label: "Manual Import", icon: CloudUpload },
+      { key: "schedule-import", label: "Schedule Import", icon: Clock3 },
+    ],
+  },
+  {
+    label: "",
+    items: [{ key: "settings", label: "System settings", icon: Settings }],
+  },
+];
+const legacyNavigation = [
+  { key: "campaigns", label: "Legacy campaigns" },
+  { key: "customers", label: "Legacy customers" },
+  { key: "products", label: "Legacy products" },
+  { key: "policies", label: "Legacy policies" },
+  { key: "legacy-scheduler", label: "Legacy one-time schedules" },
 ];
 
 export function Root() {
@@ -289,15 +329,19 @@ function AdminPortal({
   username: string;
   portal: Portal;
 }) {
-  const section = window.location.pathname.split("/")[1] || "integration";
+  const requestedSection = window.location.pathname.split("/")[1] || "overview";
+  const section =
+    (
+      {
+        "import-leads": "manual-import",
+        scheduler: "schedule-import",
+        "genesys-configuration": "integration",
+      } as Record<string, string>
+    )[requestedSection] || requestedSection;
   const [menuOpen, setMenuOpen] = useState(false);
   const navigation = [
-    ...genesysNav,
-    { key: "campaigns", label: "Source campaigns / Export", icon: Filter },
-    { key: "customers", label: "Source customers", icon: Users },
-    { key: "products", label: "Source products", icon: ShieldCheck },
-    { key: "policies", label: "Source policies", icon: FileText },
-    { key: "settings", label: "Settings", icon: Settings },
+    ...navigationGroups.flatMap((group) => group.items),
+    ...legacyNavigation,
   ];
   async function logout() {
     await api(base + "/auth/logout", {
@@ -317,18 +361,35 @@ function AdminPortal({
           <small>GENESYS OPERATIONS</small>
         </div>
         <nav>
-          {navigation.map(({ key, label, icon: Icon }) => (
-            <a
-              key={key}
-              className={section === key ? "active" : ""}
-              href={
-                ["dashboard", "integration"].includes(key) ? "/" : "/" + key
-              }
-            >
-              <Icon size={18} />
-              {label}
-            </a>
+          {navigationGroups.map((group, index) => (
+            <div className="pipe-nav-group" key={index}>
+              {group.label && (
+                <span className="pipe-nav-label">{group.label}</span>
+              )}
+              {group.items.map(({ key, label, icon: Icon }) => (
+                <a
+                  key={key}
+                  className={section === key ? "active" : ""}
+                  href={key === "overview" ? "/" : "/" + key}
+                >
+                  <Icon size={17} />
+                  {label}
+                </a>
+              ))}
+            </div>
           ))}
+          <details className="pipe-legacy-nav">
+            <summary>Legacy sources</summary>
+            {legacyNavigation.map(({ key, label }) => (
+              <a
+                key={key}
+                href={"/" + key}
+                className={section === key ? "active" : ""}
+              >
+                {label}
+              </a>
+            ))}
+          </details>
         </nav>
         <div className="sidebar-bottom">
           <button onClick={logout}>
@@ -359,13 +420,35 @@ function AdminPortal({
           </div>
         </header>
         <main className="admin-content">
-          {["integration", "import-leads", "regions", "scheduler"].includes(
-            section,
-          ) ? (
+          {[
+            "overview",
+            "templates",
+            "sources",
+            "mappings",
+            "leads",
+            "manual-import",
+            "schedule-import",
+          ].includes(section) ? (
+            <PipelineWorkspace
+              key={section}
+              page={
+                section as
+                  | "overview"
+                  | "templates"
+                  | "sources"
+                  | "mappings"
+                  | "leads"
+                  | "manual-import"
+                  | "schedule-import"
+              }
+            />
+          ) : ["integration", "regions", "legacy-scheduler"].includes(
+              section,
+            ) ? (
             <GenesysSettings
               tab={
-                section as
-                  "integration" | "import-leads" | "regions" | "scheduler"
+                (section === "legacy-scheduler" ? "scheduler" : section) as
+                  "integration" | "regions" | "scheduler"
               }
             />
           ) : section === "dashboard" ? (

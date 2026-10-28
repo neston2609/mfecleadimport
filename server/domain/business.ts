@@ -17,6 +17,7 @@ import {
 import { publishPolicyRenewal } from "./policy-renewal-events";
 import { nextRenewalPeriod } from "./renewal-date";
 import { backupsDir, dataDir } from "./json-repository";
+import { importStates, sourceIntegrations } from "./pipeline-store";
 import {
   seedAgentCallbacks,
   seedCampaignLists,
@@ -999,6 +1000,7 @@ export async function createBackup(): Promise<{
   directory: string;
   files: string[];
 }> {
+  await importStates.flush();
   const stamp = new Date()
     .toISOString()
     .replace(/[-:T.Z]/g, "")
@@ -1021,6 +1023,23 @@ export async function createBackup(): Promise<{
     );
     files.push(`config/${name}`);
   }
+  const sourceFiles = path.join(dataDir, "source-files");
+  await mkdir(sourceFiles, { recursive: true });
+  await mkdir(path.join(directory, "source-files"), { recursive: true });
+  const referencedFiles = new Set(
+    (await sourceIntegrations.all())
+      .filter((source) => ["CSV", "JSON"].includes(source.kind))
+      .map((source) => (source.config.fileId || source.id) + ".txt"),
+  );
+  for (const name of await readdir(sourceFiles)) {
+    if (!/^[a-f0-9-]{36}\.txt$/i.test(name)) continue;
+    if (!referencedFiles.has(name)) continue;
+    await copyFile(
+      path.join(sourceFiles, name),
+      path.join(directory, "source-files", name),
+    );
+    files.push(`source-files/${name}`);
+  }
   return { directory: stamp, files };
 }
 
@@ -1033,6 +1052,25 @@ export async function downloadBackup(stamp: string) {
       files[name] = JSON.parse(
         await readFile(path.join(directory, name), "utf8"),
       );
+  }
+  if (Array.isArray(files["source-integrations.json"])) {
+    files["source-integrations.json"] = (
+      files["source-integrations.json"] as Record<string, unknown>[]
+    ).map(({ secretEncrypted, ...source }) => ({
+      ...source,
+      secretConfigured: false,
+    }));
+  }
+  try {
+    for (const name of await readdir(path.join(directory, "source-files"))) {
+      if (/^[a-f0-9-]{36}\.txt$/i.test(name))
+        files[`source-files/${name}`] = await readFile(
+          path.join(directory, "source-files", name),
+          "utf8",
+        );
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   const configDir = path.join(directory, "config");
   for (const name of await readdir(configDir)) {

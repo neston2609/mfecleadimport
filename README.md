@@ -1,5 +1,7 @@
 # MFEC Lead Import/Export
 
+รุ่นปรับปรุงรองรับ Contact List Template → Source Integration → Source Mapping → Lead Configuration → Manual/Schedule Import ดู [คู่มือ Lead Workspace](docs/LEAD-WORKSPACE.md) สำหรับขั้นตอนใช้งาน การติดตั้ง JDBC driver และข้อจำกัดของข้อมูล
+
 แอปนี้ติดตั้ง build และรันได้ด้วยตัวเอง ไม่ใช้ package, server, session หรือฐานข้อมูลจากแอปอื่น
 
 ## เริ่มใช้งาน

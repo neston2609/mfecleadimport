@@ -304,7 +304,9 @@ export function App({ tab = "integration" }: { tab?: Tab }) {
         ok: boolean;
         schema: SchemaResult;
         message: string;
-      }>("/api/admin/genesys/validate-schema", { method: "POST" });
+      }>("/api/admin/pipeline/genesys/validate-contact-list", {
+        method: "POST",
+      });
       setSchemaResult(result.schema);
       await loadAll();
       if (!result.ok) throw new Error(result.message);

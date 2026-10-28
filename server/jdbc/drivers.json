@@ -1,0 +1,39 @@
+[
+  {
+    "name": "postgresql",
+    "artifact": "org/postgresql/postgresql",
+    "version": "42.7.14",
+    "sha256": "73914527305a40cce504b0d3d90b23caf565136912d607ae8ae7c5895512332c"
+  },
+  {
+    "name": "mysql-connector-j",
+    "artifact": "com/mysql/mysql-connector-j",
+    "version": "26.10.0",
+    "sha256": "cef70caf532833c9ab8f41f74773ce22c08bf503fad215c9c2ee1e9db87e759e"
+  },
+  {
+    "name": "mssql-jdbc",
+    "artifact": "com/microsoft/sqlserver/mssql-jdbc",
+    "version": "13.6.1.jre11",
+    "sha256": "4f470d23dfdf187ece2d1f9feb33d9dbd2230051b9c9676456727692a1b97d5e"
+  },
+  {
+    "name": "ojdbc11",
+    "artifact": "com/oracle/database/jdbc/ojdbc11",
+    "version": "23.26.3.0.0",
+    "sha256": "764cc3f88454d1be117e155d01ed617467b984c9c68f13090dd6083799d2bb8c"
+  },
+  {
+    "name": "mariadb-java-client",
+    "artifact": "org/mariadb/jdbc/mariadb-java-client",
+    "version": "4.0.0",
+    "sha256": "bb1211dac59ef4c54b7a8ad4755a913d36d2e81b34ca1d4cb9ffa9d5633df01f"
+  },
+  {
+    "name": "h2",
+    "artifact": "com/h2database/h2",
+    "version": "2.5.252",
+    "testOnly": true,
+    "sha256": "90b11dc413da82070ef15fc943282c1408e6ffd34fa68998335fea8603b5ff20"
+  }
+]

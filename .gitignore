@@ -11,3 +11,5 @@ exports/
 coverage/
 *.ppk
 *.pem
+server/jdbc/drivers/
+server/jdbc/*.class

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "setup:jdbc": "node scripts/setup-jdbc.mjs",
     "dev": "npm run dev:server",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite --host 0.0.0.0",
@@ -16,6 +17,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^5.0.4",
     "cross-env": "^10.1.0",
+    "csv-parse": "^7.0.3",
     "dotenv": "^18.0.6",
     "express": "^5.1.0",
     "express-rate-limit": "^8.7.1",

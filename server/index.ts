@@ -14,6 +14,10 @@ import { FileSessionStore } from "./middleware/file-session-store";
 import { genesysRegionService } from "./services/genesys/genesys-region.service";
 import { adminCredentials } from "./services/admin-credentials.service";
 import { genesysSchedulerService } from "./services/genesys/genesys-scheduler.service";
+import { pipelineRouter } from "./routes/pipeline.routes";
+import { initializePipeline } from "./domain/pipeline-store";
+import { startLeadScheduler } from "./services/lead-schedule.service";
+import { migrateLegacyCampaigns } from "./services/pipeline-migration.service";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,7 +38,7 @@ if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
 }
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "12mb" }));
 app.use(
   session({
     name: "genesys.sid",
@@ -88,6 +92,7 @@ app.get("/api/health", (_request, response) => {
 app.use("/api/admin/genesys", genesysAdminRouter);
 app.use("/api/admin/auth", authRouter);
 app.use("/api/admin/campaigns", campaignRouter);
+app.use("/api/admin/pipeline", pipelineRouter);
 app.use("/api/admin", adminDataRouter);
 app.use("/api", (_request, response) =>
   response.status(404).json({ message: "API endpoint not found" }),
@@ -136,7 +141,10 @@ app.use(
 await adminCredentials.initialize();
 await genesysRegionService.initialize();
 await initializeBusinessData();
+await initializePipeline();
+await migrateLegacyCampaigns();
 await genesysSchedulerService.start();
+await startLeadScheduler();
 
 app.listen(port, host, () => {
   console.log(`genesys listening on ${host}:${port}`);

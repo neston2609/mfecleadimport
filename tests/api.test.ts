@@ -113,6 +113,10 @@ test(
       assert.equal((await request("/manage")).status, 404);
       assert.equal((await request("/api/admin/customers")).status, 401);
       assert.equal(
+        (await request("/api/admin/pipeline/bootstrap")).status,
+        401,
+      );
+      assert.equal(
         (
           await request("/api/admin/auth/login", "POST", {
             username: "admin",
@@ -133,6 +137,154 @@ test(
       assert.match(setCookie, /HttpOnly/);
       assert.match(setCookie, /Secure/);
       const cookie = setCookie.split(";")[0];
+      const initialPipeline = await (
+        await request("/api/admin/pipeline/bootstrap", "GET", undefined, cookie)
+      ).json();
+      assert.ok(
+        initialPipeline.leads.length >= 6,
+        "Legacy campaign leads must be retained",
+      );
+      assert.ok(
+        initialPipeline.sources.every(
+          (source: Record<string, unknown>) =>
+            source.secretEncrypted === undefined,
+        ),
+      );
+      const template = await (
+        await request(
+          "/api/admin/pipeline/templates",
+          "POST",
+          {
+            name: "API custom fields",
+            contactListId: "",
+            fields: [
+              { name: "id", type: "STRING", required: true },
+              { name: "phone", type: "PHONE", required: true },
+              { name: "amount", type: "NUMBER", required: false },
+            ],
+          },
+          cookie,
+        )
+      ).json();
+      assert.ok(template.id);
+      const sourceDraft = {
+        name: "API JSON source",
+        kind: "JSON",
+        config: {
+          fileName: "fixture.json",
+          content: JSON.stringify([
+            { id: "one", phone: "0812345678", amount: 500 },
+            { id: "two", phone: "0822345678", amount: 5 },
+          ]),
+        },
+      };
+      const sourcePreview = await request(
+        "/api/admin/pipeline/sources/preview",
+        "POST",
+        { source: sourceDraft },
+        cookie,
+      );
+      assert.equal(sourcePreview.status, 200);
+      assert.equal((await sourcePreview.json()).rows.length, 2);
+      const afterPreview = await (
+        await request("/api/admin/pipeline/bootstrap", "GET", undefined, cookie)
+      ).json();
+      assert.equal(
+        afterPreview.sources.length,
+        initialPipeline.sources.length,
+        "Preview must not save a source",
+      );
+      const source = await (
+        await request(
+          "/api/admin/pipeline/sources",
+          "POST",
+          sourceDraft,
+          cookie,
+        )
+      ).json();
+      assert.ok(source.id);
+      const mapping = await (
+        await request(
+          "/api/admin/pipeline/mappings",
+          "POST",
+          {
+            name: "API mapping",
+            templateId: template.id,
+            sourceId: source.id,
+            keyField: "id",
+            fields: ["id", "phone", "amount"].map((name) => ({
+              targetField: name,
+              sourceField: name,
+              defaultValue: "",
+            })),
+          },
+          cookie,
+        )
+      ).json();
+      assert.ok(mapping.id);
+      const lead = await (
+        await request(
+          "/api/admin/pipeline/leads",
+          "POST",
+          {
+            name: "API filtered lead",
+            mappingId: mapping.id,
+            match: "ALL",
+            filters: [
+              { field: "amount", scope: "TARGET", operator: "GT", value: "10" },
+            ],
+          },
+          cookie,
+        )
+      ).json();
+      assert.ok(lead.id);
+      const previewLead = await (
+        await request(
+          `/api/admin/pipeline/leads/${lead.id}/preview`,
+          "GET",
+          undefined,
+          cookie,
+        )
+      ).json();
+      assert.equal(previewLead.summary.eligible, 1);
+      assert.equal(previewLead.rows[0].data.phone, "+66812345678");
+      assert.equal(
+        (
+          await request(
+            `/api/admin/pipeline/sources/${source.id}`,
+            "DELETE",
+            undefined,
+            cookie,
+          )
+        ).status,
+        409,
+      );
+      assert.equal(
+        (
+          await request(
+            `/api/admin/pipeline/leads/${lead.id}/export`,
+            "GET",
+            undefined,
+            cookie,
+          )
+        ).status,
+        200,
+      );
+      const newSchedule = await request(
+        "/api/admin/pipeline/schedules",
+        "POST",
+        {
+          name: "API monthly import",
+          leadId: lead.id,
+          contactListId: "11111111-1111-4111-8111-111111111111",
+          frequency: "MONTH_DAYS",
+          time: "10:30",
+          monthDays: [1, 15],
+          enabled: false,
+        },
+        cookie,
+      );
+      assert.equal(newSchedule.status, 201);
       assert.equal(
         (
           await (
