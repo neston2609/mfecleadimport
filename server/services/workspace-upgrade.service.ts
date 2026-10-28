@@ -223,7 +223,7 @@ export async function upgradeWorkspace() {
       // archived copy before removing the active file; rename cannot cross them.
       const archived = path.join(archive, name);
       await copyFile(path.join(dataDir, name), archived);
-      const handle = await open(archived, "r");
+      const handle = await open(archived, "r+");
       try {
         await handle.sync();
       } finally {
