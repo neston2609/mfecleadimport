@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   parseCsv,
   selectJsonRows,
@@ -11,6 +14,12 @@ import {
   dayNumber,
 } from "../server/services/lead-pipeline.service";
 import { nextLeadRun } from "../server/services/lead-schedule.service";
+import {
+  browseLocal,
+  validateLocalFile,
+  validateRemoteHost,
+  verifySshHostFingerprint,
+} from "../server/services/file-source.service";
 
 test("Web Service previews block metadata addresses including IPv4-mapped IPv6", async () => {
   for (const uri of [
@@ -30,6 +39,70 @@ test("Web Service previews block metadata addresses including IPv4-mapped IPv6",
       }),
       /Metadata and link-local/,
     );
+  }
+});
+
+test("remote file-source host checks block internal endpoints unless allowlisted", async () => {
+  const previous = process.env.SOURCE_REMOTE_ALLOWED_HOSTS;
+  delete process.env.SOURCE_REMOTE_ALLOWED_HOSTS;
+  try {
+    for (const address of [
+      "127.0.0.1",
+      "169.254.169.254",
+      "100.100.100.200",
+      "::1",
+      "::ffff:a9fe:a9fe",
+      "::ffff:7f00:1",
+    ])
+      await assert.rejects(validateRemoteHost(address), /blocked/i, address);
+    process.env.SOURCE_REMOTE_ALLOWED_HOSTS = "127.0.0.1,169.254.169.254";
+    assert.equal(await validateRemoteHost("127.0.0.1"), "127.0.0.1");
+    assert.equal(
+      await validateRemoteHost("169.254.169.254"),
+      "169.254.169.254",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.SOURCE_REMOTE_ALLOWED_HOSTS;
+    else process.env.SOURCE_REMOTE_ALLOWED_HOSTS = previous;
+  }
+});
+
+test("SSH host fingerprints use OpenSSH SHA256 base64 formatting", () => {
+  const hex = "00".repeat(32);
+  const expected = `SHA256:${Buffer.alloc(32).toString("base64").replace(/=+$/, "")}`;
+  assert.equal(verifySshHostFingerprint(hex, expected), true);
+  assert.equal(verifySshHostFingerprint(hex, `${expected}x`), false);
+  assert.equal(verifySshHostFingerprint("00", expected), false);
+});
+
+test("server-local files stay inside configured roots and block symlinks", async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "source-paths-"));
+  const root = path.join(folder, "allowed");
+  const outside = path.join(folder, "outside.csv");
+  const previousRoots = process.env.SOURCE_FILE_ROOTS;
+  try {
+    await mkdir(root);
+    await writeFile(path.join(root, "inside.csv"), "id\n1\n");
+    await writeFile(outside, "id\n2\n");
+    await symlink(outside, path.join(root, "linked.csv"));
+    process.env.SOURCE_FILE_ROOTS = root;
+    assert.equal(
+      (await validateLocalFile(path.join(root, "inside.csv"))).size,
+      5,
+    );
+    assert.equal((await browseLocal(root)).entries[0].name, "inside.csv");
+    await assert.rejects(
+      validateLocalFile(outside),
+      /outside the allowed source folders/i,
+    );
+    await assert.rejects(
+      validateLocalFile(path.join(root, "linked.csv")),
+      /symbolic links outside/i,
+    );
+  } finally {
+    if (previousRoots === undefined) delete process.env.SOURCE_FILE_ROOTS;
+    else process.env.SOURCE_FILE_ROOTS = previousRoots;
+    await rm(folder, { recursive: true, force: true });
   }
 });
 

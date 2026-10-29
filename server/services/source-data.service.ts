@@ -5,10 +5,13 @@ import http from "node:http";
 import https from "node:https";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { readFile } from "node:fs/promises";
-import { dataDir } from "../domain/json-repository";
 import { decryptSecret } from "./genesys/secret.service";
 import { httpError } from "../domain/business";
+import {
+  readLocalFile,
+  readRemoteFile,
+  fileReadMode,
+} from "./file-source.service";
 import type {
   DataRow,
   SourceData,
@@ -425,26 +428,25 @@ async function executeSource(
   source: SourceIntegration,
   connectOnly = false,
 ): Promise<SourceData> {
-  if (
-    ["CSV", "JSON"].includes(source.kind) &&
-    source.config.content === undefined
-  ) {
-    const fileId = source.config.fileId || source.id;
-    if (!/^[a-f0-9-]{36}$/i.test(fileId))
-      throw httpError(400, "Upload a file first");
-    try {
-      source = {
-        ...source,
-        config: {
-          ...source.config,
-          content: await readFile(
-            path.join(dataDir, "source-files", `${fileId}.txt`),
-            "utf8",
-          ),
-        },
-      };
-    } catch {
-      throw httpError(400, "Upload a CSV or JSON file first");
+  if (["CSV", "JSON"].includes(source.kind)) {
+    const mode = fileReadMode(source);
+    if (mode === "REMOTE") {
+      const content = await readRemoteFile(
+        source.config,
+        source.secretEncrypted,
+        source.config.remotePath || "",
+      );
+      source = { ...source, config: { ...source.config, content } };
+    } else if (mode === "SERVER" && source.config.serverPath) {
+      const content = await readLocalFile(source.config.serverPath);
+      source = { ...source, config: { ...source.config, content } };
+    } else if (mode === "UPLOAD") {
+      throw httpError(
+        400,
+        "This source uses an uploaded computer file. Select a server-local or remote file to enable previews and scheduled imports.",
+      );
+    } else if (source.config.content === undefined) {
+      throw httpError(400, "Browse and select a server-local or remote file");
     }
   }
   if (source.kind === "JDBC") return jdbcData(source, connectOnly);

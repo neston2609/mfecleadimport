@@ -15,7 +15,9 @@ import {
   ChevronRight,
   CheckCircle2,
   Database,
-  FileUp,
+  File,
+  Folder,
+  ArrowUp,
   Layers,
   Loader2,
   Plus,
@@ -75,7 +77,19 @@ type DraftSource = {
   kind: SourceIntegration["kind"];
   config: SourceIntegration["config"];
   secret?: string;
+  passphrase?: string;
   secretConfigured?: boolean;
+};
+type FileEntry = {
+  name: string;
+  path: string;
+  type: "DIRECTORY" | "FILE";
+  size?: number;
+};
+type FileListing = {
+  path: string;
+  roots: string[];
+  entries: FileEntry[];
 };
 const titles: Record<Page, [string, string]> = {
   overview: [
@@ -84,7 +98,7 @@ const titles: Record<Page, [string, string]> = {
   ],
   sources: [
     "Source Integration",
-    "Connect a database or Web Service, or upload a CSV / JSON file.",
+    "Connect a database or Web Service, or configure a realtime server or remote CSV / JSON file source.",
   ],
   mappings: [
     "Source Mapping",
@@ -327,6 +341,8 @@ export function PipelineWorkspace({ page }: { page: Page }) {
   const [lists, setLists] = useState<{ id: string; name: string }[]>([]);
   const [source, setSource] = useState<DraftSource | null>(null),
     [sourceData, setSourceData] = useState<SourceData | null>(null);
+  const [fileListing, setFileListing] = useState<FileListing | null>(null);
+  const [remoteTested, setRemoteTested] = useState(false);
   const [mapping, setMapping] = useState<
     | (Partial<SourceMapping> & {
         name: string;
@@ -477,6 +493,8 @@ export function PipelineWorkspace({ page }: { page: Page }) {
     setError("");
     setMessage("");
     setSourceData(null);
+    setFileListing(null);
+    setRemoteTested(false);
     if (page === "sources")
       setSource({
         name: "",
@@ -523,8 +541,101 @@ export function PipelineWorkspace({ page }: { page: Page }) {
     (item) => item.id === selectedMapping?.sourceId,
   );
   function updateSource(values: Partial<SourceIntegration["config"]>) {
-    if (source)
+    if (source) {
       setSource({ ...source, config: { ...source.config, ...values } });
+      if (
+        "host" in values ||
+        "sshHostKeyFingerprint" in values ||
+        "port" in values ||
+        "username" in values ||
+        "transferProtocol" in values ||
+        "authMethod" in values ||
+        "allowInsecureFtp" in values
+      )
+        setRemoteTested(false);
+    }
+  }
+  function fileConnectionBody(path?: string) {
+    if (!source) return {};
+    const {
+      fileLocation,
+      transferProtocol,
+      host,
+      sshHostKeyFingerprint,
+      port,
+      username,
+      authMethod,
+      remotePath,
+      allowInsecureFtp,
+    } = source.config;
+    return {
+      sourceId: source.id,
+      config: {
+        fileLocation,
+        transferProtocol,
+        host,
+        sshHostKeyFingerprint,
+        port,
+        username,
+        authMethod,
+        remotePath,
+        allowInsecureFtp,
+      },
+      secret: source.secret || undefined,
+      passphrase: source.passphrase || undefined,
+      path,
+    };
+  }
+  async function browseServer(path = "") {
+    await run("file-browse", async () => {
+      const listing = await api<FileListing>(
+        endpoint + "/sources/files/local/browse",
+        {
+          method: "POST",
+          body: JSON.stringify({ path }),
+        },
+      );
+      setFileListing(listing);
+    });
+  }
+  async function browseRemoteFiles(path = "") {
+    await run("file-browse", async () => {
+      const listing = await api<FileListing>(
+        endpoint + "/sources/files/remote/browse",
+        {
+          method: "POST",
+          body: JSON.stringify(fileConnectionBody(path)),
+        },
+      );
+      setFileListing(listing);
+    });
+  }
+  async function selectSourceFile(entry: FileEntry) {
+    if (!source) return;
+    if (entry.type === "DIRECTORY") {
+      if (source.config.fileLocation === "REMOTE")
+        await browseRemoteFiles(entry.path);
+      else await browseServer(entry.path);
+      return;
+    }
+    updateSource(
+      source.config.fileLocation === "REMOTE"
+        ? { remotePath: entry.path, fileName: entry.name }
+        : { serverPath: entry.path, fileName: entry.name },
+    );
+    setFileListing(null);
+    setSourceData(null);
+  }
+  async function testRemote() {
+    if (!source) return;
+    await run("remote-test", async () => {
+      const result = await api<{ message: string }>(
+        endpoint + "/sources/files/remote/test",
+        { method: "POST", body: JSON.stringify(fileConnectionBody()) },
+      );
+      setRemoteTested(true);
+      setMessage(result.message);
+    });
   }
   async function previewDraft(connectOnly = false) {
     if (!source) return;
@@ -740,8 +851,23 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                       </div>
                       <RecordActions
                         onEdit={() => {
-                          setSource({ ...item });
+                          setSource({
+                            ...item,
+                            config: {
+                              ...item.config,
+                              ...(item.kind === "CSV" || item.kind === "JSON"
+                                ? {
+                                    fileLocation:
+                                      item.config.fileLocation || "SERVER",
+                                    fileId: undefined,
+                                    content: undefined,
+                                  }
+                                : {}),
+                            },
+                          });
                           setSourceData(null);
+                          setFileListing(null);
+                          setRemoteTested(false);
                         }}
                         onPreview={() =>
                           void run("preview", async () =>
@@ -1277,62 +1403,401 @@ export function PipelineWorkspace({ page }: { page: Page }) {
               )}
               {["CSV", "JSON"].includes(source.kind) && (
                 <>
-                  <label className="pipe-file-drop">
-                    <FileUp size={22} />
-                    <span>
-                      {source.config.fileName ||
-                        "Choose a " + source.kind + " file"}
-                    </span>
-                    <input
-                      aria-label="Source file"
-                      type="file"
-                      accept={
-                        source.kind === "CSV"
-                          ? ".csv,text/csv"
-                          : ".json,application/json"
-                      }
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (!file) return;
-                        if (file.size > 5 * 1024 * 1024) {
-                          setError("Files must be 5 MB or smaller");
-                          return;
-                        }
-                        void file.text().then((content) => {
+                  <div className="pipe-field-grid">
+                    <label>
+                      File location
+                      <select
+                        value={source.config.fileLocation || "SERVER"}
+                        onChange={(event) => {
+                          const fileLocation = event.target.value as
+                            "SERVER" | "REMOTE";
                           setSource({
                             ...source,
                             config: {
                               ...source.config,
-                              content,
-                              fileName: file.name,
+                              fileLocation,
+                              transferProtocol:
+                                fileLocation === "REMOTE"
+                                  ? source.config.transferProtocol || "SFTP"
+                                  : source.config.transferProtocol,
+                              authMethod:
+                                fileLocation === "REMOTE"
+                                  ? source.config.authMethod || "PASSWORD"
+                                  : source.config.authMethod,
+                              serverPath:
+                                fileLocation === "SERVER"
+                                  ? source.config.serverPath
+                                  : "",
+                              remotePath:
+                                fileLocation === "REMOTE"
+                                  ? source.config.remotePath
+                                  : "",
+                              fileName: "",
+                              fileId: undefined,
+                              content: undefined,
                             },
+                            secret: "",
+                            passphrase: "",
                           });
+                          setFileListing(null);
                           setSourceData(null);
-                        });
-                      }}
-                    />
-                  </label>
-                  <small className="pipe-muted">
-                    UTF-8 · up to 5 MB. Uploaded files remain server-side for
-                    future scheduled imports.
-                  </small>
-                  <details>
-                    <summary>Paste or inspect file content</summary>
-                    <textarea
-                      aria-label="File content"
-                      className="pipe-code"
-                      rows={7}
-                      value={source.config.content || ""}
-                      onChange={(event) =>
-                        updateSource({ content: event.target.value })
-                      }
-                      placeholder={
-                        source.id
-                          ? "A file is stored on the server. Paste or upload content to replace it."
-                          : "Paste CSV / JSON content"
-                      }
-                    />
-                  </details>
+                          setRemoteTested(false);
+                        }}
+                      >
+                        <option value="SERVER">Local (Server)</option>
+                        <option value="REMOTE">Remote server</option>
+                      </select>
+                    </label>
+                    <div className="pipe-file-selection">
+                      <span>
+                        {source.config.fileName || "No file selected"}
+                      </span>
+                      <button
+                        type="button"
+                        className="admin-secondary"
+                        onClick={() => {
+                          setFileListing(null);
+                          if (source.config.fileLocation === "REMOTE")
+                            void browseRemoteFiles(
+                              source.config.remotePath
+                                ? source.config.remotePath.substring(
+                                    0,
+                                    source.config.remotePath.lastIndexOf("/"),
+                                  ) || "/"
+                                : "/",
+                            );
+                          else void browseServer();
+                        }}
+                        disabled={Boolean(busy)}
+                      >
+                        <Folder size={15} /> Browse files
+                      </button>
+                    </div>
+                  </div>
+                  {source.config.fileLocation === "REMOTE" && (
+                    <>
+                      <div className="pipe-field-grid">
+                        <label>
+                          Transfer protocol
+                          <select
+                            value={source.config.transferProtocol || "SFTP"}
+                            onChange={(event) =>
+                              updateSource({
+                                transferProtocol: event.target.value as
+                                  "SCP" | "SFTP" | "FTP" | "FTPS",
+                                port: undefined,
+                              })
+                            }
+                          >
+                            <option value="SCP">SCP (SSH)</option>
+                            <option value="SFTP">SFTP (SSH)</option>
+                            <option value="FTP">FTP (unencrypted)</option>
+                            <option value="FTPS">FTPS (TLS)</option>
+                          </select>
+                        </label>
+                        <label>
+                          Host
+                          <input
+                            value={source.config.host || ""}
+                            onChange={(event) =>
+                              updateSource({ host: event.target.value })
+                            }
+                            placeholder="files.example.com"
+                          />
+                        </label>
+                        {(["SCP", "SFTP"].includes(
+                          source.config.transferProtocol || "SFTP",
+                        ) ||
+                          !source.config.transferProtocol) && (
+                          <label>
+                            SSH server host-key fingerprint (SHA256)
+                            <input
+                              value={source.config.sshHostKeyFingerprint || ""}
+                              onChange={(event) =>
+                                updateSource({
+                                  sshHostKeyFingerprint: event.target.value,
+                                })
+                              }
+                              placeholder="SHA256:base64-fingerprint"
+                            />
+                            <small>
+                              Verify this fingerprint with the server
+                              administrator before connecting.
+                            </small>
+                          </label>
+                        )}
+                        <label>
+                          Port
+                          <input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={
+                              source.config.port ||
+                              (
+                                {
+                                  SCP: 22,
+                                  SFTP: 22,
+                                  FTP: 21,
+                                  FTPS: 21,
+                                } as const
+                              )[source.config.transferProtocol || "SFTP"]
+                            }
+                            onChange={(event) =>
+                              updateSource({
+                                port: Number(event.target.value) || undefined,
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Authentication
+                          <select
+                            value={source.config.authMethod || "PASSWORD"}
+                            onChange={(event) => {
+                              updateSource({
+                                authMethod: event.target.value as
+                                  "PASSWORD" | "KEY",
+                              });
+                              setSource((previous) =>
+                                previous
+                                  ? { ...previous, secret: "", passphrase: "" }
+                                  : previous,
+                              );
+                            }}
+                          >
+                            <option value="PASSWORD">
+                              Username / password
+                            </option>
+                            {["SCP", "SFTP"].includes(
+                              source.config.transferProtocol || "SFTP",
+                            ) && <option value="KEY">SSH private key</option>}
+                          </select>
+                        </label>
+                        <label>
+                          Username
+                          <input
+                            autoComplete="off"
+                            value={source.config.username || ""}
+                            onChange={(event) =>
+                              updateSource({ username: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          {source.config.authMethod === "KEY"
+                            ? "Private key (OpenSSH format)"
+                            : "Password"}
+                          <textarea
+                            rows={source.config.authMethod === "KEY" ? 5 : 1}
+                            autoComplete="new-password"
+                            value={source.secret || ""}
+                            placeholder={
+                              source.secretConfigured
+                                ? "Configured — leave blank to keep"
+                                : source.config.authMethod === "KEY"
+                                  ? "-----BEGIN OPENSSH PRIVATE KEY-----"
+                                  : "Remote account password"
+                            }
+                            onChange={(event) => {
+                              setSource({
+                                ...source,
+                                secret: event.target.value,
+                              });
+                              setRemoteTested(false);
+                            }}
+                          />
+                        </label>
+                        {source.config.authMethod === "KEY" && (
+                          <label>
+                            Private key passphrase (if encrypted)
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              value={source.passphrase || ""}
+                              placeholder={
+                                source.secretConfigured
+                                  ? "Configured — leave blank to keep"
+                                  : "Optional passphrase"
+                              }
+                              onChange={(event) => {
+                                setSource({
+                                  ...source,
+                                  passphrase: event.target.value,
+                                });
+                                setRemoteTested(false);
+                              }}
+                            />
+                          </label>
+                        )}
+                        {source.config.transferProtocol === "FTP" && (
+                          <label className="pipe-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={source.config.allowInsecureFtp || false}
+                              onChange={(event) =>
+                                updateSource({
+                                  allowInsecureFtp: event.target.checked,
+                                })
+                              }
+                            />
+                            I understand FTP credentials and data are
+                            unencrypted
+                          </label>
+                        )}
+                      </div>
+                      <div className="pipe-inline">
+                        <button
+                          type="button"
+                          className="admin-secondary"
+                          disabled={
+                            Boolean(busy) ||
+                            !source.config.host ||
+                            !source.config.username
+                          }
+                          onClick={() => void testRemote()}
+                        >
+                          <CheckCircle2 size={15} /> Test connection
+                        </button>
+                        {remoteTested && (
+                          <small className="pipe-muted">
+                            Connection tested
+                          </small>
+                        )}
+                      </div>
+                      <small className="pipe-muted">
+                        Remote files are reread on each preview and scheduled
+                        run. SCP and SFTP connections verify the configured SSH
+                        host-key fingerprint.
+                      </small>
+                    </>
+                  )}
+                  {source.config.fileLocation !== "REMOTE" && (
+                    <small className="pipe-muted">
+                      Server folders are restricted to administrator-configured
+                      SOURCE_FILE_ROOTS. The file is reread on each preview and
+                      scheduled run.
+                    </small>
+                  )}
+                  {fileListing && (
+                    <div
+                      className="pipe-file-browser"
+                      aria-label="Choose source file"
+                    >
+                      <div className="pipe-file-browser-head">
+                        <strong>
+                          {source.config.fileLocation === "REMOTE"
+                            ? "Remote files"
+                            : "Server files"}
+                        </strong>
+                        <span title={fileListing.path}>
+                          {fileListing.path || "Allowed folders"}
+                        </span>
+                        <button
+                          type="button"
+                          className="pipe-icon"
+                          aria-label="Close file browser"
+                          onClick={() => setFileListing(null)}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      {source.config.fileLocation !== "REMOTE" &&
+                        !fileListing.path &&
+                        fileListing.roots.map((root) => (
+                          <button
+                            key={root}
+                            type="button"
+                            className="pipe-file-entry"
+                            onClick={() => void browseServer(root)}
+                          >
+                            <Folder size={16} />
+                            <span>{root}</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        ))}
+                      {source.config.fileLocation === "REMOTE" &&
+                        !fileListing.path && (
+                          <button
+                            type="button"
+                            className="pipe-file-entry"
+                            onClick={() => void browseRemoteFiles("/")}
+                          >
+                            <Folder size={16} />
+                            <span>Connect and browse remote files</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        )}
+                      {fileListing.path &&
+                        (source.config.fileLocation === "REMOTE" ||
+                          fileListing.roots.some((root) =>
+                            fileListing.path.startsWith(root + "/"),
+                          )) && (
+                          <button
+                            type="button"
+                            className="pipe-file-entry"
+                            onClick={() => {
+                              const parent =
+                                fileListing.path
+                                  .replace(/\\/g, "/")
+                                  .split("/")
+                                  .slice(0, -1)
+                                  .join("/") || "/";
+                              if (source.config.fileLocation === "REMOTE")
+                                void browseRemoteFiles(parent);
+                              else if (
+                                fileListing.roots.some(
+                                  (root) =>
+                                    parent === root ||
+                                    parent.startsWith(root + "/"),
+                                )
+                              )
+                                void browseServer(parent);
+                              else
+                                setFileListing({
+                                  path: "",
+                                  roots: fileListing.roots,
+                                  entries: [],
+                                });
+                            }}
+                          >
+                            <ArrowUp size={16} />
+                            <span>Parent folder</span>
+                          </button>
+                        )}
+                      {fileListing.entries.map((entry) => (
+                        <button
+                          key={entry.path}
+                          type="button"
+                          className="pipe-file-entry"
+                          onClick={() => void selectSourceFile(entry)}
+                        >
+                          {entry.type === "DIRECTORY" ? (
+                            <Folder size={16} />
+                          ) : (
+                            <File size={16} />
+                          )}
+                          <span>{entry.name}</span>
+                          {entry.type === "FILE" && (
+                            <small>
+                              {entry.size == null
+                                ? ""
+                                : `${(entry.size / 1024).toFixed(1)} KB`}
+                            </small>
+                          )}
+                          <ArrowRight size={15} />
+                        </button>
+                      ))}
+                      {!fileListing.entries.length && fileListing.path && (
+                        <p className="pipe-muted">
+                          No CSV or JSON files or folders found here.
+                        </p>
+                      )}
+                      {busy === "file-browse" && (
+                        <span className="pipe-muted">Loading folder…</span>
+                      )}
+                    </div>
+                  )}
                   {source.kind === "CSV" && (
                     <label>
                       Delimiter

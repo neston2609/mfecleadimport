@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import path from "node:path";
@@ -16,6 +16,12 @@ async function freePort() {
 }
 async function launch() {
   const folder = await mkdtemp(path.join(os.tmpdir(), "independent-app-"));
+  const sourceRoot = path.join(folder, "source-inputs");
+  await mkdir(sourceRoot, { recursive: true });
+  await writeFile(
+    path.join(sourceRoot, "customers.csv"),
+    "id,phone\n1,0812345678\n",
+  );
   const port = await freePort();
   let output = "";
   const child: ChildProcess = spawn(
@@ -28,6 +34,7 @@ async function launch() {
         HOST: "127.0.0.1",
         PORT: String(port),
         DATA_DIR: path.join(folder, "data"),
+        SOURCE_FILE_ROOTS: sourceRoot,
         BACKUPS_DIR: path.join(folder, "backups"),
         EXPORTS_DIR: path.join(folder, "exports"),
         APP_SECRET: "isolated-test-app-secret",
@@ -78,7 +85,7 @@ async function launch() {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     assert.ok(ready, "Application did not start: " + output);
-    return { folder, request, stop };
+    return { folder, sourceRoot, request, stop };
   } catch (error) {
     await stop();
     throw error;
@@ -89,7 +96,7 @@ test(
   "standalone APIs preserve authentication, remove obsolete features and report actual source status",
   { timeout: 30000 },
   async () => {
-    const { request, stop } = await launch();
+    const { sourceRoot, request, stop } = await launch();
     try {
       assert.equal((await request("/api/health")).status, 200);
       assert.equal(
@@ -129,11 +136,12 @@ test(
       assert.equal(status.integration.status, "DISCONNECTED");
       assert.deepEqual(status.sources, []);
       const draft = {
-        name: "Uploaded customers",
+        name: "Server customers",
         kind: "CSV",
         config: {
+          fileLocation: "SERVER",
+          serverPath: path.join(sourceRoot, "customers.csv"),
           fileName: "customers.csv",
-          content: "id,phone\n1,0812345678\n",
         },
       };
       assert.equal(

@@ -22,6 +22,12 @@ import {
   publicSource,
 } from "../services/lead-pipeline.service";
 import {
+  browseLocal,
+  browseRemote,
+  testRemoteConnection,
+} from "../services/file-source.service";
+import { encryptSecret } from "../services/genesys/secret.service";
+import {
   sourceIntegrations,
   importJobs,
   leadDefinitions,
@@ -40,9 +46,106 @@ import {
   runSchedule,
 } from "../services/lead-schedule.service";
 import { GenesysConfigService } from "../services/genesys/genesys-config.service";
+import type { SourceIntegration } from "../domain/pipeline-types";
+import type { SourceConfig } from "../domain/pipeline-types";
 
 export const pipelineRouter = Router();
 pipelineRouter.use(requireAdmin);
+const fileConnection = z
+  .object({
+    sourceId: z.string().uuid().optional(),
+    config: z
+      .object({
+        fileLocation: z.enum(["SERVER", "REMOTE"]).optional(),
+        serverPath: z.string().max(2000).optional(),
+        transferProtocol: z.enum(["SCP", "SFTP", "FTP", "FTPS"]).optional(),
+        host: z.string().max(253).optional(),
+        sshHostKeyFingerprint: z.string().max(128).optional(),
+        port: z.number().int().min(1).max(65535).optional(),
+        username: z.string().max(200).optional(),
+        remotePath: z.string().max(2000).optional(),
+        authMethod: z.enum(["PASSWORD", "KEY"]).optional(),
+        allowInsecureFtp: z.boolean().optional(),
+      })
+      .strict(),
+    secret: z.string().max(8000).optional(),
+    passphrase: z.string().max(1000).optional(),
+    path: z.string().max(2000).optional(),
+  })
+  .strict();
+function configuredRemoteSecret(
+  incoming: string | undefined,
+  passphrase: string | undefined,
+  previous: SourceIntegration | undefined,
+  config: Pick<
+    SourceConfig,
+    | "host"
+    | "port"
+    | "username"
+    | "transferProtocol"
+    | "authMethod"
+    | "sshHostKeyFingerprint"
+  >,
+) {
+  if (incoming)
+    return encryptSecret(
+      JSON.stringify({ secret: incoming, passphrase: passphrase || "" }),
+    );
+  if (
+    previous &&
+    ["CSV", "JSON"].includes(previous.kind) &&
+    previous.config.fileLocation === "REMOTE" &&
+    previous.config.host === config.host &&
+    previous.config.port === config.port &&
+    previous.config.username === config.username &&
+    previous.config.transferProtocol === config.transferProtocol
+  ) {
+    if (
+      (previous.config.authMethod || "PASSWORD") ===
+      (config.authMethod || "PASSWORD")
+    )
+      return previous.secretEncrypted;
+  }
+  return "";
+}
+pipelineRouter.post(
+  "/sources/files/local/browse",
+  async (request, response) => {
+    const data = z
+      .object({ path: z.string().max(2000).optional() })
+      .parse(request.body);
+    response.json(await browseLocal(data.path || ""));
+  },
+);
+pipelineRouter.post("/sources/files/remote/test", async (request, response) => {
+  const data = fileConnection.parse(request.body);
+  const previous = data.sourceId
+    ? await entity(sourceIntegrations, data.sourceId)
+    : undefined;
+  const secretEncrypted = configuredRemoteSecret(
+    data.secret,
+    data.passphrase,
+    previous,
+    data.config,
+  );
+  response.json(await testRemoteConnection(data.config, secretEncrypted));
+});
+pipelineRouter.post(
+  "/sources/files/remote/browse",
+  async (request, response) => {
+    const data = fileConnection.parse(request.body);
+    const previous = data.sourceId
+      ? await entity(sourceIntegrations, data.sourceId)
+      : undefined;
+    const secretEncrypted = configuredRemoteSecret(
+      data.secret,
+      data.passphrase,
+      previous,
+      data.config,
+    );
+    response.json(await browseRemote(data.config, secretEncrypted, data.path));
+  },
+);
 pipelineRouter.get("/status", async (_req, res) =>
   res.json(await systemStatus()),
 );

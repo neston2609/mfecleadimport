@@ -375,6 +375,83 @@
 .pipe-file-drop input {
   max-width: 360px;
 }
+.pipe-file-selection {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #d8e1e5;
+  border-radius: 5px;
+  background: #f8fbfb;
+}
+.pipe-file-selection > span {
+  overflow: hidden;
+  color: #51626b;
+  font-size: 13px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipe-file-browser {
+  display: grid;
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid #d9e2e5;
+  border-radius: 6px;
+  background: #fff;
+}
+.pipe-file-browser-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #e3e9eb;
+  background: #f5f9f9;
+  font-size: 13px;
+}
+.pipe-file-browser-head span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #75848b;
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipe-file-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 39px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid #edf1f2;
+  background: #fff;
+  color: #33464e;
+  text-align: left;
+  cursor: pointer;
+}
+.pipe-file-entry:hover {
+  background: #f2f8f8;
+}
+.pipe-file-entry > span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.pipe-file-entry > small {
+  color: #819097;
+}
+.pipe-file-browser > .pipe-muted {
+  padding: 0 12px;
+}
 .pipe-code {
   font-family: ui-monospace, monospace;
   margin-top: 12px;

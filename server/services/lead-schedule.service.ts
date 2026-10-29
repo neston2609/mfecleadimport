@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   importSchedules,
   leadDefinitions,
+  sourceIntegrations,
   sourceMappings,
 } from "../domain/pipeline-store";
 import { configuredContactList } from "./contact-list.service";
@@ -71,6 +72,23 @@ export async function saveSchedule(input: unknown, actor: string, id?: string) {
   const data = scheduleInput.parse(input);
   const lead = await entity(leadDefinitions, data.leadId);
   const mapping = await entity(sourceMappings, lead.mappingId);
+  const source = await entity(sourceIntegrations, mapping.sourceId);
+  if (["CSV", "JSON"].includes(source.kind)) {
+    const localFile =
+      (source.config.fileLocation === "SERVER" ||
+        (!source.config.fileLocation && !source.config.fileId)) &&
+      source.config.serverPath;
+    const remoteFile =
+      source.config.fileLocation === "REMOTE" &&
+      source.config.host &&
+      source.config.remotePath &&
+      source.config.transferProtocol;
+    if (!localFile && !remoteFile)
+      throw httpError(
+        400,
+        "Schedule Import requires a Local (Server) or Remote file source. Browser-upload files are not supported.",
+      );
+  }
   if (data.contactListId !== mapping.contactListId)
     throw httpError(
       400,
@@ -99,6 +117,25 @@ export async function runSchedule(id: string, actor: string) {
     throw httpError(409, "This schedule is running");
   if (hasActiveImport()) throw httpError(409, "Another import is running");
   const schedule = await entity(importSchedules, id);
+  const lead = await entity(leadDefinitions, schedule.leadId);
+  const mapping = await entity(sourceMappings, lead.mappingId);
+  const source = await entity(sourceIntegrations, mapping.sourceId);
+  if (["CSV", "JSON"].includes(source.kind)) {
+    const localFile =
+      (source.config.fileLocation === "SERVER" ||
+        (!source.config.fileLocation && !source.config.fileId)) &&
+      source.config.serverPath;
+    const remoteFile =
+      source.config.fileLocation === "REMOTE" &&
+      source.config.host &&
+      source.config.remotePath &&
+      source.config.transferProtocol;
+    if (!localFile && !remoteFile)
+      throw httpError(
+        400,
+        "Scheduled file imports require a configured Local (Server) or Remote source.",
+      );
+  }
   runningSchedules.add(id);
   try {
     const job = await startImport(

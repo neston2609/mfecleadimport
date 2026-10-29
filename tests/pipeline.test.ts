@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm, access } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  access,
+  mkdir,
+  writeFile,
+  readFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import path from "node:path";
@@ -13,6 +20,7 @@ test(
     const folder = await mkdtemp(path.join(os.tmpdir(), "mfec-pipeline-"));
     process.env.DATA_DIR = path.join(folder, "data");
     process.env.BACKUPS_DIR = path.join(folder, "backups");
+    process.env.SOURCE_FILE_ROOTS = path.join(folder, "source-inputs");
     process.env.APP_SECRET = "pipeline-test-secret";
     process.env.SOURCE_ALLOWED_HOSTS = "127.0.0.1";
     process.env.JDBC_TEST_H2 = "true";
@@ -652,6 +660,33 @@ test(
           const result = await schedules.runSchedule(schedule.id, "test");
           assert.equal(result.status, "SUCCESS");
           assert.equal(result.total, 0);
+          const original = await pipeline.entity(sourceIntegrations, source.id);
+          await sourceIntegrations.mutate((rows) => {
+            const item = rows.find((row) => row.id === source.id)!;
+            item.kind = "CSV";
+            item.config = {
+              fileId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              fileName: "uploaded.csv",
+            };
+          });
+          await assert.rejects(
+            schedules.saveSchedule(
+              {
+                name: "Legacy upload schedule",
+                leadId: lead.id,
+                contactListId: listId,
+                frequency: "DAILY",
+                time: "09:00",
+                enabled: false,
+              },
+              "test",
+            ),
+            /browser-upload files are not supported/i,
+          );
+          await sourceIntegrations.mutate((rows) => {
+            const index = rows.findIndex((row) => row.id === source.id);
+            rows[index] = original;
+          });
           await assert.rejects(
             pipeline.deleteConfiguration("leads", lead.id, "test"),
             /used by one or more schedules|in use/i,
@@ -709,25 +744,20 @@ test(
         },
       );
       await t.test(
-        "uploaded source files survive editing and downloaded backups redact credentials",
+        "local source paths reread on demand, uploads are not persisted and backups redact credentials",
         async () => {
-          await pipeline.saveSource(
-            {
-              id: source.id,
-              name: source.name,
-              kind: source.kind,
-              config: source.config,
-            },
-            "test",
-            source.id,
-          );
           assert.equal(observedAuthorization, "Bearer private-source-token");
+          const sourceRoot = process.env.SOURCE_FILE_ROOTS!;
+          await mkdir(sourceRoot, { recursive: true });
+          const csvPath = path.join(sourceRoot, "customers.csv");
+          await writeFile(csvPath, 'id,name\r\n1,"Alice, A"\r\n');
           const file = await pipeline.saveSource(
             {
-              name: "Uploaded CSV",
+              name: "Server CSV",
               kind: "CSV",
               config: {
-                content: 'id,name\r\n1,"Alice, A"\r\n',
+                fileLocation: "SERVER",
+                serverPath: csvPath,
                 fileName: "customers.csv",
               },
             },
@@ -743,15 +773,40 @@ test(
             "test",
             file.id,
           );
-          const loaded = await sources.loadSource(
+          let loaded = await sources.loadSource(
             await pipeline.entity(sourceIntegrations, saved.id),
           );
           assert.equal(loaded.rows[0].name, "Alice, A");
+          await writeFile(csvPath, "id,name\n2,Bob\n");
+          loaded = await sources.loadSource(
+            await pipeline.entity(sourceIntegrations, saved.id),
+          );
+          assert.equal(loaded.rows[0].name, "Bob");
+          const pastedPreview = await pipeline.previewSource({
+            name: "Transient file preview",
+            kind: "CSV",
+            config: { content: "id,name\ntransient,Temporary" },
+          });
+          assert.equal(pastedPreview.rows[0].name, "Temporary");
+          await assert.rejects(
+            pipeline.saveSource(
+              {
+                name: "Browser upload is not persisted",
+                kind: "CSV",
+                config: {
+                  content: "id,name\ntransient,Temporary",
+                  fileName: "computer.csv",
+                },
+              },
+              "test",
+            ),
+            /server-local file/i,
+          );
           await pipeline.saveSource(
             {
               name: "Taken source name",
               kind: "CSV",
-              config: { content: "id,name\n2,Bob" },
+              config: { fileLocation: "SERVER", serverPath: csvPath },
             },
             "test",
           );
@@ -761,7 +816,7 @@ test(
                 id: file.id,
                 name: "Taken source name",
                 kind: "CSV",
-                config: { content: "id,name\n1,Mallory" },
+                config: { fileLocation: "SERVER", serverPath: csvPath },
               },
               "test",
               file.id,
@@ -771,10 +826,15 @@ test(
           const unchanged = await sources.loadSource(
             await pipeline.entity(sourceIntegrations, file.id),
           );
-          assert.equal(unchanged.rows[0].name, "Alice, A");
+          assert.equal(unchanged.rows[0].name, "Bob");
           const backup = await business.createBackup();
           const downloaded = await business.downloadBackup(backup.directory);
-          assert.ok(downloaded[`source-files/${file.config.fileId}.txt`]);
+          assert.equal(
+            Object.keys(downloaded).some((name) =>
+              name.startsWith("source-files/"),
+            ),
+            false,
+          );
           assert.ok(
             !JSON.stringify(downloaded).includes("private-source-token"),
           );

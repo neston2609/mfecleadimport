@@ -16,7 +16,7 @@ npm run dev:server
 npm run dev:client
 ```
 
-Frontend: http://localhost:5175. Backend defaults to port 3002. Configure APP_SECRET, SESSION_SECRET, ADMIN_USERNAME and ADMIN_PASSWORD in the local environment. Runtime data, credentials, uploads and backups are excluded from Git. New installations start with empty source/mapping/lead configuration.
+Frontend: http://localhost:5175. Backend defaults to port 3002. Configure APP_SECRET, SESSION_SECRET, ADMIN_USERNAME and ADMIN_PASSWORD in the local environment. Runtime data, credentials, legacy uploads and backups are excluded from Git. New installations start with empty source/mapping/lead configuration.
 
 ## Workspace
 
@@ -26,6 +26,18 @@ Frontend: http://localhost:5175. Backend defaults to port 3002. Configure APP_SE
 - Lead Configuration: named selections and filters.
 - Lead Importer: Manual Import Lead and Schedule Import.
 - System settings: administrator password and redacted backup downloads.
+
+CSV/JSON Source Integrations read live from Local (Server) or SCP, SFTP, FTP,
+and FTPS paths. Server browsing is confined to `SOURCE_FILE_ROOTS` (defaults to
+`DATA_DIR/source-inputs`). Remote loopback, link-local, and metadata addresses
+are blocked unless the exact hostname/IP is listed in
+`SOURCE_REMOTE_ALLOWED_HOSTS`. FTP is unencrypted and requires explicit
+confirmation in the source editor. Files are limited to 5 MB and reread for
+each preview and scheduled import. Browser-computer uploads and pasted file
+contents are not available for Source Integration or Schedule Import. SCP/SFTP
+connections require an administrator-verified `SHA256:` SSH host-key
+fingerprint; obtain it from the remote server administrator over a trusted
+channel rather than trusting a value learned from an unverified connection.
 
 Paths: /, /regions, /integration, /contact-lists, /sources, /mappings, /leads, /manual-import, /schedule-import, /settings. Previous /genesys URLs redirect to root paths. Removed feature routes return 404.
 

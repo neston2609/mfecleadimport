@@ -4,10 +4,9 @@ import {
   refreshContactLists,
 } from "./contact-list.service";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { JsonRepository, dataDir } from "../domain/json-repository";
+import { JsonRepository } from "../domain/json-repository";
 import { httpError } from "../domain/business";
 import { audit } from "../domain/store";
 import {
@@ -34,6 +33,7 @@ import type {
 import { encryptSecret } from "./genesys/secret.service";
 import { genesysApiClient } from "./genesys/genesys-api.client";
 import { loadSource } from "./source-data.service";
+import { validateLocalFile } from "./file-source.service";
 import { recordSourceObservation } from "./source-observation.service";
 import {
   MAX_SOURCE_ROWS,
@@ -58,6 +58,7 @@ export const sourceInput = z.object({
   name,
   kind: z.enum(["JDBC", "WEB", "CSV", "JSON"]),
   secret: z.string().max(8000).optional(),
+  passphrase: z.string().max(1000).optional(),
   clearSecret: z.boolean().optional(),
   config: z
     .object({
@@ -83,6 +84,16 @@ export const sourceInput = z.object({
       fileName: z.string().max(300).optional(),
       fileId: z.string().uuid().optional(),
       delimiter: z.enum([",", ";", "\t", ""]).optional(),
+      fileLocation: z.enum(["SERVER", "REMOTE"]).optional(),
+      serverPath: z.string().max(2000).optional(),
+      transferProtocol: z.enum(["SCP", "SFTP", "FTP", "FTPS"]).optional(),
+      host: z.string().max(253).optional(),
+      sshHostKeyFingerprint: z.string().max(128).optional(),
+      port: z.number().int().min(1).max(65535).optional(),
+      remotePath: z.string().max(2000).optional(),
+      authMethod: z.enum(["PASSWORD", "KEY"]).optional(),
+      keyFileName: z.string().max(255).optional(),
+      allowInsecureFtp: z.boolean().optional(),
     })
     .strict(),
 });
@@ -219,8 +230,21 @@ export async function draftSource(input: unknown, id?: string) {
     secretEncrypted: data.clearSecret
       ? ""
       : data.secret
-        ? encryptSecret(data.secret)
-        : previous?.kind === data.kind
+        ? encryptSecret(
+            data.config.fileLocation === "REMOTE"
+              ? JSON.stringify({
+                  secret: data.secret,
+                  passphrase: data.passphrase || "",
+                })
+              : data.secret,
+          )
+        : previous?.kind === data.kind &&
+            previous.config.fileLocation === data.config.fileLocation &&
+            previous.config.transferProtocol === data.config.transferProtocol &&
+            previous.config.authMethod === data.config.authMethod &&
+            previous.config.host === data.config.host &&
+            previous.config.port === data.config.port &&
+            previous.config.username === data.config.username
           ? previous.secretEncrypted
           : "",
   } satisfies SourceIntegration;
@@ -240,23 +264,47 @@ export async function previewSource(
 }
 export async function saveSource(input: unknown, actor: string, id?: string) {
   const source = await draftSource(input, id);
-  const preview = await loadSource(source, false, false);
+  const preview = await loadSource(
+    {
+      ...source,
+      config: {
+        ...source.config,
+        fileId: undefined,
+      },
+    },
+    false,
+    false,
+  );
   if (!preview.fields.length)
     throw httpError(
       400,
       "The source has no fields. Preview a non-empty source before saving.",
     );
-  const { content, ...config } = source.config;
-  if (content !== undefined && ["CSV", "JSON"].includes(source.kind)) {
-    const directory = path.join(dataDir, "source-files");
-    await mkdir(directory, { recursive: true });
-    const fileId = randomUUID();
-    const temporary = path.join(directory, `${fileId}.tmp`);
-    await writeFile(temporary, content, { mode: 0o600 });
-    await rename(temporary, path.join(directory, `${fileId}.txt`));
-    config.fileId = fileId;
+  const sourceConfig = { ...source.config };
+  delete sourceConfig.content;
+  const config = { ...sourceConfig };
+  if (["CSV", "JSON"].includes(source.kind)) {
+    if (config.fileLocation === "REMOTE") {
+      if (!config.host || !config.remotePath || !config.transferProtocol)
+        throw httpError(400, "Configure the remote server and choose a file");
+    } else if (config.fileLocation === "SERVER" || !config.fileLocation) {
+      config.fileLocation = "SERVER";
+      if (!config.serverPath)
+        throw httpError(400, "Browse and choose a server-local file");
+      await validateLocalFile(config.serverPath);
+    } else {
+      throw httpError(
+        400,
+        "Choose a Local (Server) or Remote file. Browser-upload sources cannot be saved.",
+      );
+    }
+    config.fileName = path.basename(
+      config.fileLocation === "REMOTE"
+        ? config.remotePath || ""
+        : config.serverPath || "",
+    );
   }
-  // File IDs must remain stable when first saving the uploaded content.
+  delete config.fileId;
   const saved = await sourceIntegrations.mutate((rows) => {
     if (
       rows.some(

@@ -31,6 +31,16 @@ export type SourceConfig = {
   fileName?: string;
   fileId?: string;
   delimiter?: string;
+  fileLocation?: "SERVER" | "REMOTE";
+  serverPath?: string;
+  transferProtocol?: "SCP" | "SFTP" | "FTP" | "FTPS";
+  host?: string;
+  sshHostKeyFingerprint?: string;
+  port?: number;
+  remotePath?: string;
+  authMethod?: "PASSWORD" | "KEY";
+  keyFileName?: string;
+  allowInsecureFtp?: boolean;
 };
 export type SourceIntegration = Entity & {
   kind: SourceKind;

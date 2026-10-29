@@ -64,7 +64,12 @@ export async function createBackup(): Promise<{
   await mkdir(path.join(directory, "source-files"), { recursive: true });
   const referencedFiles = new Set(
     (await sourceIntegrations.all())
-      .filter((source) => ["CSV", "JSON"].includes(source.kind))
+      .filter(
+        (source) =>
+          ["CSV", "JSON"].includes(source.kind) &&
+          (source.config.fileLocation ||
+            (source.config.fileId ? "UPLOAD" : "SERVER")) === "UPLOAD",
+      )
       .map((source) => (source.config.fileId || source.id) + ".txt"),
   );
   for (const name of await readdir(sourceFiles)) {
@@ -166,6 +171,16 @@ const sourceSchema = z.object({
       fileName: z.string().max(300).optional(),
       fileId: recordId.optional(),
       delimiter: z.enum([",", ";", "\t", ""]).optional(),
+      fileLocation: z.enum(["SERVER", "REMOTE"]).optional(),
+      serverPath: z.string().max(2000).optional(),
+      transferProtocol: z.enum(["SCP", "SFTP", "FTP", "FTPS"]).optional(),
+      host: z.string().max(253).optional(),
+      sshHostKeyFingerprint: z.string().max(128).optional(),
+      port: z.number().int().min(1).max(65535).optional(),
+      remotePath: z.string().max(2000).optional(),
+      authMethod: z.enum(["PASSWORD", "KEY"]).optional(),
+      keyFileName: z.string().max(255).optional(),
+      allowInsecureFtp: z.boolean().optional(),
     })
     .strict(),
   fields: z.array(fieldName).max(200),
@@ -344,7 +359,11 @@ export async function restoreConfigurationBackup(
       .map((item) => `${item.regionId}:${item.contactListId}`),
   );
   for (const source of sources) {
-    if (["CSV", "JSON"].includes(source.kind)) {
+    if (
+      ["CSV", "JSON"].includes(source.kind) &&
+      (source.config.fileLocation ||
+        (source.config.fileId ? "UPLOAD" : "SERVER")) === "UPLOAD"
+    ) {
       const fileId = source.config.fileId || source.id;
       if (!Object.hasOwn(safeEntries, `source-files/${fileId}.txt`))
         throw httpError(
@@ -412,11 +431,6 @@ export async function restoreConfigurationBackup(
         400,
         `Mapping ${mapping.name} references a missing destination field`,
       );
-    if (
-      source.kind === "CSV" &&
-      (!source.config.fileId || !/^[a-f0-9-]{36}$/i.test(source.config.fileId))
-    )
-      throw httpError(400, `Source ${source.name} has an invalid file ID`);
   }
   for (const lead of leads)
     if (!mappingIds.has(lead.mappingId))
@@ -462,7 +476,12 @@ export async function restoreConfigurationBackup(
   };
   const oldSourceFiles = new Map<string, Buffer | null>();
   for (const source of restoredSources) {
-    if (!["CSV", "JSON"].includes(source.kind)) continue;
+    if (
+      !["CSV", "JSON"].includes(source.kind) ||
+      (source.config.fileLocation ||
+        (source.config.fileId ? "UPLOAD" : "SERVER")) !== "UPLOAD"
+    )
+      continue;
     const fileId = source.config.fileId || source.id;
     const filePath = path.join(dataDir, "source-files", `${fileId}.txt`);
     try {
@@ -502,7 +521,11 @@ export async function restoreConfigurationBackup(
   }
   try {
     for (const source of restoredSources) {
-      if (["CSV", "JSON"].includes(source.kind)) {
+      if (
+        ["CSV", "JSON"].includes(source.kind) &&
+        (source.config.fileLocation ||
+          (source.config.fileId ? "UPLOAD" : "SERVER")) === "UPLOAD"
+      ) {
         const fileId = source.config.fileId || source.id;
         const directory = path.join(dataDir, "source-files");
         await mkdir(directory, { recursive: true });
