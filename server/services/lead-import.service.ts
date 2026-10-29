@@ -65,6 +65,33 @@ type ImportSelection = {
 async function writeState(state: ImportState) {
   await importStates.set(state);
 }
+function missingContact(error: unknown) {
+  return (
+    error instanceof GenesysApiError &&
+    error.status === 404 &&
+    /contact with id .+ could not be found/i.test(error.message)
+  );
+}
+async function createContact(
+  base: string,
+  data: Record<string, string>,
+): Promise<string> {
+  const created = await genesysApiClient.post<unknown>(base, [
+    { data, callable: true },
+  ]);
+  const result = Array.isArray(created)
+    ? created[0]
+    : (created as { entities?: unknown[]; contacts?: unknown[] })
+        ?.entities?.[0] ||
+      (created as { contacts?: unknown[] })?.contacts?.[0] ||
+      created;
+  const contactId = (result as { id?: string })?.id;
+  if (!contactId)
+    throw new Error(
+      "Genesys did not return a contact ID. Reconcile the contact before retrying.",
+    );
+  return contactId;
+}
 async function syncRow(
   row: LeadRow,
   preview: LeadPreview,
@@ -97,35 +124,33 @@ async function syncRow(
     updatedAt: timestamp,
   };
   const base = `/api/v2/outbound/contactlists/${encodeURIComponent(destination.id)}/contacts`;
-  const updating = Boolean(state.contactId);
+  let updating = Boolean(state.contactId);
   await writeState(state);
   try {
     if (updating) {
-      const existing = await genesysApiClient.get<{
-        id: string;
-        data: Record<string, string>;
-        [key: string]: unknown;
-      }>(`${base}/${encodeURIComponent(state.contactId)}`);
-      await genesysApiClient.put(
-        `${base}/${encodeURIComponent(state.contactId)}`,
-        { ...existing, data: { ...existing.data, ...row.data } },
-      );
-    } else {
-      const created = await genesysApiClient.post<unknown>(base, [
-        { data: row.data, callable: true },
-      ]);
-      const result = Array.isArray(created)
-        ? created[0]
-        : (created as { entities?: unknown[]; contacts?: unknown[] })
-            ?.entities?.[0] ||
-          (created as { contacts?: unknown[] })?.contacts?.[0] ||
-          created;
-      const contactId = (result as { id?: string })?.id;
-      if (!contactId)
-        throw new Error(
-          "Genesys did not return a contact ID. Reconcile the contact before retrying.",
+      try {
+        const existing = await genesysApiClient.get<{
+          id: string;
+          data: Record<string, string>;
+          [key: string]: unknown;
+        }>(`${base}/${encodeURIComponent(state.contactId)}`);
+        await genesysApiClient.put(
+          `${base}/${encodeURIComponent(state.contactId)}`,
+          { ...existing, data: { ...existing.data, ...row.data } },
         );
-      state.contactId = contactId;
+      } catch (error) {
+        // A migrated or previously synchronized contact may have since been
+        // deleted in Genesys. Only recover when the API explicitly confirms
+        // that this contact ID is absent; do not treat other 404s as safe.
+        if (!missingContact(error)) throw error;
+        state.contactId = "";
+        state.payloadHash = "";
+        updating = false;
+        await writeState(state);
+      }
+    }
+    if (!updating) {
+      state.contactId = await createContact(base, row.data);
       // Persist the remote identity before any subsequent verification request.
       await writeState(state);
     }
@@ -147,7 +172,7 @@ async function syncRow(
       state.status === "UNKNOWN"
         ? "Creation outcome is unknown. Reconcile this contact in Genesys before retrying to avoid duplicates."
         : error instanceof GenesysApiError
-          ? `Genesys rejected the request (HTTP ${error.status})`
+          ? `Genesys rejected the request (HTTP ${error.status})${error.message.includes(": ") ? `: ${error.message.split(": ").slice(1).join(": ").slice(0, 220)}` : ""}`
           : "Contact update failed. Retry after checking the destination.";
     state.updatedAt = new Date().toISOString();
     await writeState(state);

@@ -182,6 +182,11 @@ test(
         const contactId = url.split("/").at(-1)!;
         if (remote.has(contactId) && method === "GET")
           return Response.json(remote.get(contactId));
+        if (method === "GET")
+          return Response.json(
+            { message: `A Contact with id ${contactId} could not be found` },
+            { status: 404 },
+          );
         if (remote.has(contactId) && method === "PUT") {
           puts++;
           const body = JSON.parse(String(init?.body));
@@ -407,6 +412,32 @@ test(
           assert.equal(job.created, 0);
           assert.equal(puts, 2);
           assert.equal(posts, 1, "re-import updates rather than duplicates");
+
+          remote.delete("remote-1");
+          preview = await pipeline.resolveLead(lead.id, listId);
+          assert.equal(preview.rows[0].status, "ALREADY_SYNCED");
+          job = await imports.awaitImport(
+            (
+              await imports.startImport(
+                {
+                  leadId: lead.id,
+                  contactListId: listId,
+                  recordIds: [preview.rows[0].id],
+                  revision: preview.revision,
+                  reimport: true,
+                },
+                "test",
+              )
+            ).id,
+          );
+          assert.equal(job.status, "SUCCESS");
+          assert.equal(job.created, 1);
+          assert.equal(job.updated, 0);
+          assert.equal(posts, 2);
+          assert.equal(remote.has("remote-2"), true);
+          preview = await pipeline.resolveLead(lead.id, listId);
+          assert.equal(preview.rows[0].status, "ALREADY_SYNCED");
+          assert.equal(preview.rows[0].contactId, "remote-2");
         },
       );
       await t.test(
