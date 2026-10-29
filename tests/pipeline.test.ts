@@ -17,6 +17,8 @@ test(
     process.env.SOURCE_ALLOWED_HOSTS = "127.0.0.1";
     process.env.JDBC_TEST_H2 = "true";
     const listId = "11111111-1111-4111-8111-111111111111";
+    const alternateListId = "22222222-2222-4222-8222-222222222222";
+    const incompatibleListId = "33333333-3333-4333-8333-333333333333";
     const columns = ["customer_id", "name", "phone", "premium", "expiry"];
     const date = (days: number) =>
       new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -81,6 +83,9 @@ test(
           initializePipeline,
           contactListConfigurations,
           sourceIntegrations,
+          leadDefinitions,
+          importSchedules,
+          importJobs,
           importStates,
         },
         { genesysRegionService },
@@ -122,7 +127,11 @@ test(
           });
         if (url.includes("/outbound/contactlists?page"))
           return Response.json({
-            entities: [{ id: listId, name: "Custom contacts" }],
+            entities: [
+              { id: listId, name: "Custom contacts" },
+              { id: alternateListId, name: "Alternate contacts" },
+              { id: incompatibleListId, name: "Different columns" },
+            ],
             pageCount: 1,
           });
         if (url.endsWith(`/contactlists/${listId}`))
@@ -130,6 +139,20 @@ test(
             id: listId,
             name: "Custom contacts",
             columnNames: columns,
+            phoneColumns: [{ columnName: "phone" }],
+          });
+        if (url.endsWith(`/contactlists/${alternateListId}`))
+          return Response.json({
+            id: alternateListId,
+            name: "Alternate contacts",
+            columnNames: columns,
+            phoneColumns: [{ columnName: "phone" }],
+          });
+        if (url.endsWith(`/contactlists/${incompatibleListId}`))
+          return Response.json({
+            id: incompatibleListId,
+            name: "Different columns",
+            columnNames: columns.slice(0, -1),
             phoneColumns: [{ columnName: "phone" }],
           });
         if (
@@ -361,6 +384,29 @@ test(
           assert.equal(puts, 1);
           assert.equal(posts, 1);
           assert.equal(remote.get("remote-1")?.data.premium, "700");
+
+          preview = await pipeline.resolveLead(lead.id, listId);
+          assert.equal(preview.rows[0].status, "ALREADY_SYNCED");
+          job = await imports.awaitImport(
+            (
+              await imports.startImport(
+                {
+                  leadId: lead.id,
+                  contactListId: listId,
+                  recordIds: [preview.rows[0].id],
+                  revision: preview.revision,
+                  reimport: true,
+                },
+                "test",
+              )
+            ).id,
+          );
+          assert.equal(job.status, "SUCCESS");
+          assert.equal(job.reimport, true);
+          assert.equal(job.updated, 1);
+          assert.equal(job.created, 0);
+          assert.equal(puts, 2);
+          assert.equal(posts, 1, "re-import updates rather than duplicates");
         },
       );
       await t.test(
@@ -451,12 +497,58 @@ test(
           assert.equal(result.total, 0);
           await assert.rejects(
             pipeline.deleteConfiguration("leads", lead.id, "test"),
-            /in use/,
+            /used by one or more schedules|in use/i,
           );
           await assert.rejects(
             pipeline.deleteConfiguration("mappings", mapping.id, "test"),
             /in use/,
           );
+
+          const disposableLead = await pipeline.saveLead(
+            {
+              name: "Force delete fixture",
+              mappingId: mapping.id,
+              match: "ALL",
+              filters: [],
+            },
+            "test",
+          );
+          const disposableSchedule = await schedules.saveSchedule(
+            {
+              name: "Fixture schedule",
+              leadId: disposableLead.id,
+              contactListId: listId,
+              frequency: "DAILY",
+              time: "09:00",
+              enabled: false,
+            },
+            "test",
+          );
+          const priorStateCount = (await importStates.all()).length;
+          const priorJobCount = (await importJobs.all()).length;
+          const priorRemoteCount = remote.size;
+          await assert.rejects(
+            pipeline.deleteConfiguration("leads", disposableLead.id, "test"),
+            /force delete/i,
+          );
+          const deletion = await pipeline.deleteConfiguration(
+            "leads",
+            disposableLead.id,
+            "test",
+            true,
+          );
+          assert.deepEqual(deletion, { deleted: true, removedSchedules: 1 });
+          assert.equal(
+            await leadDefinitions.findById("id", disposableLead.id),
+            undefined,
+          );
+          assert.equal(
+            await importSchedules.findById("id", disposableSchedule.id),
+            undefined,
+          );
+          assert.equal((await importStates.all()).length, priorStateCount);
+          assert.equal((await importJobs.all()).length, priorJobCount);
+          assert.equal(remote.size, priorRemoteCount);
         },
       );
       await t.test(
@@ -625,6 +717,79 @@ test(
           const preview = await pipeline.resolveLead(lead.id, listId);
           assert.equal(preview.summary.synced, 0);
           assert.equal(preview.summary.eligible, 2);
+        },
+      );
+      await t.test(
+        "manual imports can change to a compatible destination and re-import its synced contacts",
+        async () => {
+          const alternatePreview = await pipeline.resolveLead(
+            lead.id,
+            alternateListId,
+          );
+          assert.equal(
+            alternatePreview.destination.contactListId,
+            alternateListId,
+          );
+          assert.equal(alternatePreview.summary.eligible, 2);
+          await assert.rejects(
+            pipeline.resolveLead(lead.id, incompatibleListId),
+            /columns must match/i,
+          );
+
+          const row = alternatePreview.rows.find(
+            (item) => item.sourceKey === "a",
+          )!;
+          const postsBefore = posts;
+          const firstJob = await imports.awaitImport(
+            (
+              await imports.startImport(
+                {
+                  leadId: lead.id,
+                  contactListId: alternateListId,
+                  recordIds: [row.id],
+                  revision: alternatePreview.revision,
+                },
+                "test",
+              )
+            ).id,
+          );
+          assert.equal(firstJob.status, "SUCCESS");
+          assert.equal(firstJob.contactListId, alternateListId);
+          assert.equal(firstJob.created, 1);
+          assert.equal(posts, postsBefore + 1);
+
+          const syncedPreview = await pipeline.resolveLead(
+            lead.id,
+            alternateListId,
+          );
+          const syncedRow = syncedPreview.rows.find(
+            (item) => item.sourceKey === "a",
+          )!;
+          assert.equal(syncedRow.status, "ALREADY_SYNCED");
+          const putsBefore = puts;
+          const reimportJob = await imports.awaitImport(
+            (
+              await imports.startImport(
+                {
+                  leadId: lead.id,
+                  contactListId: alternateListId,
+                  recordIds: [syncedRow.id],
+                  revision: syncedPreview.revision,
+                  reimport: true,
+                },
+                "test",
+              )
+            ).id,
+          );
+          assert.equal(reimportJob.status, "SUCCESS");
+          assert.equal(reimportJob.reimport, true);
+          assert.equal(reimportJob.updated, 1);
+          assert.equal(puts, putsBefore + 1);
+          assert.equal(
+            posts,
+            postsBefore + 1,
+            "re-import updates the known contact",
+          );
         },
       );
     } finally {

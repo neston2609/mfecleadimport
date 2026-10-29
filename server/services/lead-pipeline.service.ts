@@ -352,18 +352,8 @@ export async function deleteConfiguration(
   kind: string,
   id: string,
   actor: string,
+  force = false,
 ) {
-  const references =
-    kind === "sources"
-      ? (await sourceMappings.all()).some((row) => row.sourceId === id)
-      : kind === "mappings"
-        ? (await leadDefinitions.all()).some((row) => row.mappingId === id)
-        : (await importSchedules.all()).some((row) => row.leadId === id);
-  if (references)
-    throw httpError(
-      409,
-      "This configuration is in use. Update its dependent configurations first.",
-    );
   const repository = (
     {
       sources: sourceIntegrations,
@@ -372,12 +362,57 @@ export async function deleteConfiguration(
     } as Record<string, JsonRepository<Entity>>
   )[kind];
   if (!repository) throw httpError(404, "Unknown configuration type");
+  const current = await repository.findById("id", id);
+  if (!current) throw httpError(404, "Configuration not found");
+
+  let removedSchedules = 0;
+  if (kind === "leads") {
+    const schedules = await importSchedules.all();
+    const linkedSchedules = schedules.filter((row) => row.leadId === id);
+    const jobs = await importJobs.all();
+    const runningSchedule = linkedSchedules.some(
+      (schedule) =>
+        schedule.lastStatus === "RUNNING" ||
+        jobs.some(
+          (job) => job.id === schedule.lastJobId && job.status === "RUNNING",
+        ),
+    );
+    if (runningSchedule)
+      throw httpError(
+        409,
+        "Cannot delete a Lead Configuration while its schedule is running",
+      );
+    if (linkedSchedules.length && !force)
+      throw httpError(
+        409,
+        "This configuration is used by one or more schedules. Use force delete to remove the Lead Configuration and its linked schedules.",
+      );
+    if (force && linkedSchedules.length) {
+      removedSchedules = linkedSchedules.length;
+      await importSchedules.mutate((rows) => {
+        for (let index = rows.length - 1; index >= 0; index--)
+          if (rows[index].leadId === id) rows.splice(index, 1);
+      }, true);
+    }
+  } else {
+    const references =
+      kind === "sources"
+        ? (await sourceMappings.all()).some((row) => row.sourceId === id)
+        : (await leadDefinitions.all()).some((row) => row.mappingId === id);
+    if (references)
+      throw httpError(
+        409,
+        "This configuration is in use. Update its dependent configurations first.",
+      );
+  }
+
   await repository.mutate((rows) => {
     const index = rows.findIndex((row) => row.id === id);
-    if (index < 0) throw httpError(404, "Configuration not found");
+    if (index < 0) throw httpError(409, "Configuration changed during delete");
     rows.splice(index, 1);
   }, true);
-  await audit("DELETE_PIPELINE_CONFIGURATION", actor, id, { kind });
+  await audit("DELETE_PIPELINE_CONFIGURATION", actor, id, { kind, force });
+  return { deleted: true, removedSchedules };
 }
 
 export async function contactLists() {
@@ -478,22 +513,41 @@ export async function resolveLead(
 ): Promise<LeadPreview> {
   const lead = await entity(leadDefinitions, id);
   const mapping = await entity(sourceMappings, lead.mappingId);
-  const [configured, source, states] = await Promise.all([
+  const [mappedDestination, source, states] = await Promise.all([
     configuredContactList(mapping.contactListId),
     entity(sourceIntegrations, mapping.sourceId),
     importStates.all(),
   ]);
-  if (mapping.regionId && mapping.regionId !== configured.regionId)
+  if (mapping.regionId && mapping.regionId !== mappedDestination.regionId)
     throw httpError(
       409,
       "This mapping belongs to another Genesys region. Edit the mapping before importing.",
     );
-  if (listId && listId !== mapping.contactListId)
+  const configured =
+    listId && listId !== mapping.contactListId
+      ? await configuredContactList(listId)
+      : mappedDestination;
+  if (configured.regionId !== mappedDestination.regionId)
     throw httpError(
       409,
-      "The destination must match the Genesys Contact List selected in this Source Mapping.",
+      "The destination Contact List must be in the same Genesys region as the Source Mapping.",
     );
   listId = configured.uuid;
+  if (
+    configured.fields.length !== mappedDestination.fields.length ||
+    configured.fields.some(
+      (field) =>
+        !mappedDestination.fields.some((target) => target.name === field.name),
+    ) ||
+    mappedDestination.fields.some(
+      (field) =>
+        !configured.fields.some((target) => target.name === field.name),
+    )
+  )
+    throw httpError(
+      409,
+      "The destination Contact List columns must match the Source Mapping. Choose a compatible list or update the mapping.",
+    );
   const destination = {
     ...configured,
     fields: configured.fields.map((field) => {

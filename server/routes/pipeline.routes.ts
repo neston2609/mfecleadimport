@@ -19,12 +19,17 @@ import {
   entity,
   publicSource,
 } from "../services/lead-pipeline.service";
-import { sourceIntegrations, importJobs } from "../domain/pipeline-store";
+import {
+  sourceIntegrations,
+  importJobs,
+  leadDefinitions,
+} from "../domain/pipeline-store";
 import { loadSource } from "../services/source-data.service";
 import {
   startImport,
   reconcileContact,
   clearLeadDestination,
+  exclusiveDestinationAction,
 } from "../services/lead-import.service";
 import {
   saveSchedule,
@@ -103,7 +108,34 @@ for (const [kind, handler] of Object.entries(handlers)) {
     ),
   );
   pipelineRouter.delete(`/${kind}/:id`, async (request, response) => {
-    await deleteConfiguration(kind, request.params.id, request.user!.name);
+    const force = kind === "leads" && request.query.force === "true";
+    const remove = async () => {
+      if (force) {
+        const { confirmation } = z
+          .object({ confirmation: z.string().trim().min(1).max(120) })
+          .parse(request.body);
+        const existing = await entity(leadDefinitions, request.params.id);
+        if (confirmation !== existing.name)
+          throw Object.assign(
+            new Error("Lead Configuration name confirmation does not match"),
+            { status: 400 },
+          );
+      }
+      return deleteConfiguration(
+        kind,
+        request.params.id,
+        request.user!.name,
+        force,
+      );
+    };
+    const result =
+      kind === "leads"
+        ? await exclusiveDestinationAction(remove)
+        : await remove();
+    if (force) {
+      response.json(result);
+      return;
+    }
     response.status(204).end();
   });
 }
@@ -145,6 +177,7 @@ pipelineRouter.post("/imports", async (request, response) => {
       contactListId: z.string().min(1).max(200),
       revision: z.string().max(100).optional(),
       recordIds: z.array(z.string().max(100)).min(1).max(10000).optional(),
+      reimport: z.boolean().optional(),
     })
     .parse(request.body);
   response.status(202).json(await startImport(data, request.user!.name));

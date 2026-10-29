@@ -60,6 +60,7 @@ async function syncRow(
   preview: LeadPreview,
   destination: Destination,
   actor: string,
+  reimport = false,
 ) {
   const timestamp = new Date().toISOString();
   const previous = await importStates.findById("id", row.id);
@@ -68,7 +69,11 @@ async function syncRow(
       "Previous creation outcome is unknown; reconcile the contact first",
     );
   const hash = contactHash(row.data);
-  if (previous?.status === "SYNCED" && previous.payloadHash === hash)
+  if (
+    !reimport &&
+    previous?.status === "SYNCED" &&
+    previous.payloadHash === hash
+  )
     return "SKIPPED";
   const state: ImportState = {
     id: row.id,
@@ -152,7 +157,7 @@ async function execute(
       let status = "FAILED",
         message = "";
       try {
-        status = await syncRow(row, preview, destination, actor);
+        status = await syncRow(row, preview, destination, actor, job.reimport);
         if (status === "CREATED") job.created++;
         else if (status === "UPDATED") job.updated++;
         else job.skipped++;
@@ -225,6 +230,7 @@ export async function startImport(
     contactListId: string;
     recordIds?: string[];
     revision?: string;
+    reimport?: boolean;
   },
   actor: string,
   scheduleId = "",
@@ -269,10 +275,14 @@ export async function startImport(
         "The destination Contact List must contain a configured phone column",
       );
     const selected = input.recordIds ? new Set(input.recordIds) : null;
+    const canSelect = (row: LeadRow) =>
+      input.reimport === true
+        ? row.status === "ALREADY_SYNCED" && Boolean(row.contactId)
+        : eligible(row);
     if (
       selected &&
       [...selected].some(
-        (id) => !preview.rows.some((row) => row.id === id && eligible(row)),
+        (id) => !preview.rows.some((row) => row.id === id && canSelect(row)),
       )
     )
       throw httpError(
@@ -280,9 +290,14 @@ export async function startImport(
         "Some selected records are no longer eligible. Refresh the preview.",
       );
     const rows = preview.rows.filter(
-      (row) => eligible(row) && (!selected || selected.has(row.id)),
+      (row) => canSelect(row) && (!selected || selected.has(row.id)),
     );
     for (const row of rows) {
+      if (input.reimport && (!row.contactId || row.status !== "ALREADY_SYNCED"))
+        throw httpError(
+          409,
+          `Record ${row.sourceKey} has no unchanged synchronized contact to re-import`,
+        );
       if (
         !phoneColumns.some((column) =>
           /^\+?[1-9]\d{7,14}$/.test(
@@ -299,6 +314,7 @@ export async function startImport(
       id: randomUUID(),
       leadId: preview.lead.id,
       leadName: preview.lead.name,
+      reimport: input.reimport === true,
       sourceId: preview.mapping.sourceId,
       contactListId: input.contactListId,
       scheduleId,

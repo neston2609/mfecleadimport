@@ -247,7 +247,7 @@ button:disabled {
 }
 .leadsync-theme.admin-shell {
   display: grid;
-  grid-template-columns: 262px minmax(0, 1fr);
+  grid-template-columns: 310px minmax(0, 1fr);
   grid-template-rows: 64px minmax(0, 1fr);
   min-height: 100svh;
   background: #f0f7ff;
@@ -496,6 +496,7 @@ button:disabled {
   padding: 12px 17px;
   gap: 15px;
   line-height: 1.5;
+  white-space: nowrap;
 }
 .leadsync-theme .admin-sidebar nav a svg {
   flex-shrink: 0;
@@ -526,6 +527,9 @@ button:disabled {
   cursor: pointer;
   font-size: 13px;
   color: #fff;
+}
+.ls-nav-section > summary > span {
+  white-space: nowrap;
 }
 .ls-nav-section > summary::-webkit-details-marker {
   display: none;
@@ -1255,7 +1259,7 @@ button:disabled {
 }
 @media (max-width: 1250px) {
   .leadsync-theme.admin-shell {
-    grid-template-columns: 235px minmax(0, 1fr);
+    grid-template-columns: 300px minmax(0, 1fr);
   }
   .ls-import-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -1368,7 +1372,7 @@ button:disabled {
   }
   .leadsync-theme .admin-sidebar {
     position: fixed;
-    width: 262px;
+    width: min(310px, calc(100vw - 16px));
     left: 0;
     top: 64px;
     transform: translateX(-100%);

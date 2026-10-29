@@ -264,10 +264,12 @@ function DataTable({ data }: { data: SourceData | null }) {
 function RecordActions({
   onEdit,
   onDelete,
+  onForceDelete,
   onPreview,
 }: {
   onEdit?: () => void;
   onDelete: () => void;
+  onForceDelete?: () => void;
   onPreview?: () => void;
 }) {
   const feedback = useContext(FeedbackContext);
@@ -302,6 +304,11 @@ function RecordActions({
       >
         <Trash2 size={16} />
       </button>
+      {onForceDelete && (
+        <button className="admin-secondary danger-link" onClick={onForceDelete}>
+          Force delete
+        </button>
+      )}
     </div>
   );
 }
@@ -433,6 +440,25 @@ export function PipelineWorkspace({ page }: { page: Page }) {
       await api(`${endpoint}/${kind}/${id}`, { method: "DELETE" });
       await refresh();
       setMessage("Configuration deleted.");
+    });
+  }
+  function forceDeleteLead(lead: LeadDefinition) {
+    const confirmation = window.prompt(
+      `Force delete "${lead.name}"? This also deletes schedules linked to this Lead Configuration. Import history, contact identities, and Genesys contacts are preserved. Type the Lead Configuration name to confirm.`,
+    );
+    if (confirmation !== lead.name) return;
+    void run("force-delete", async () => {
+      const result = await api<{ removedSchedules: number }>(
+        `${endpoint}/leads/${lead.id}?force=true`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ confirmation }),
+        },
+      );
+      await refresh();
+      setMessage(
+        `Lead Configuration force deleted. ${result.removedSchedules} linked schedule(s) removed; import history and Genesys contacts were preserved.`,
+      );
     });
   }
   function create() {
@@ -810,6 +836,7 @@ export function PipelineWorkspace({ page }: { page: Page }) {
                           )
                         }
                         onDelete={() => remove("leads", item.id)}
+                        onForceDelete={() => forceDeleteLead(item)}
                       />
                     </article>
                   ))
@@ -2082,13 +2109,18 @@ function ManualImporter({
 }) {
   const [search, setSearch] = useState("");
   const [allFields, setAllFields] = useState(false);
-  const [confirmation, setConfirmation] = useState<{ ids?: string[] } | null>(
-    null,
-  );
+  const [confirmation, setConfirmation] = useState<{
+    ids?: string[];
+    reimport?: boolean;
+  } | null>(null);
   const activeImport = data.jobs.find((item) => item.status === "RUNNING");
   const [leadId, setLeadId] = useState(activeImport?.leadId || ""),
     [listId, setListId] = useState(activeImport?.contactListId || ""),
     [preview, setPreview] = useState<LeadPreview | null>(null);
+  const reimportCount =
+    preview?.rows.filter(
+      (row) => row.status === "ALREADY_SYNCED" && Boolean(row.contactId),
+    ).length || 0;
   const [loading, setLoading] = useState(false),
     [selected, setSelected] = useState<string[]>([]),
     [page, setPage] = useState(1);
@@ -2147,13 +2179,17 @@ function ManualImporter({
     setLeadId(id);
     const lead = data.leads.find((item) => item.id === id);
     const mapping = data.mappings.find((item) => item.id === lead?.mappingId);
-    if (mapping?.contactListId) setListId(mapping.contactListId);
+    if (mapping?.contactListId) {
+      setListId(mapping.contactListId);
+      return mapping.contactListId;
+    }
+    return "";
   }
   const active = starting || job?.status === "RUNNING";
-  async function start(ids?: string[], confirmed = false) {
-    if (!preview || !listId) return;
+  async function start(ids?: string[], confirmed = false, reimport = false) {
+    if (!preview || !listId || (reimport && !reimportCount)) return;
     if (!confirmed) {
-      setConfirmation({ ids });
+      setConfirmation({ ids, reimport });
       return;
     }
     setStarting(true);
@@ -2167,6 +2203,7 @@ function ManualImporter({
             contactListId: listId,
             recordIds: ids,
             revision: preview.revision,
+            reimport,
           }),
         }),
       );
@@ -2221,6 +2258,8 @@ function ManualImporter({
                 disabled={active}
                 onChange={(event) => {
                   selectLead(event.target.value);
+                  setPreview(null);
+                  setSelected([]);
                   setSearch("");
                 }}
               >
@@ -2237,8 +2276,13 @@ function ManualImporter({
               <select
                 aria-label="Genesys Contact List"
                 value={listId}
-                disabled={active || Boolean(leadId)}
-                onChange={(event) => setListId(event.target.value)}
+                disabled={active}
+                onChange={(event) => {
+                  setListId(event.target.value);
+                  setPreview(null);
+                  setSelected([]);
+                  setPage(1);
+                }}
               >
                 <option value="">Select destination Contact List</option>
                 {listId && !lists.some((item) => item.id === listId) && (
@@ -2283,6 +2327,16 @@ function ManualImporter({
             >
               <Upload size={17} />
               Import All
+            </button>
+            <button
+              className="admin-secondary"
+              disabled={
+                active || !listId || !reimportCount || preview?.truncated
+              }
+              onClick={() => void start(undefined, false, true)}
+            >
+              <RefreshCw size={17} />
+              Re-import All Synced ({reimportCount})
             </button>
           </div>
           {job && (
@@ -2451,14 +2505,26 @@ function ManualImporter({
                             disabled={
                               active ||
                               !listId ||
-                              !canImport(row.status) ||
+                              (!canImport(row.status) &&
+                                !(
+                                  row.status === "ALREADY_SYNCED" &&
+                                  row.contactId
+                                )) ||
                               preview.truncated
                             }
-                            onClick={() => void start([row.id])}
+                            onClick={() =>
+                              void start(
+                                [row.id],
+                                false,
+                                row.status === "ALREADY_SYNCED",
+                              )
+                            }
                           >
-                            {row.status === "UPDATE_AVAILABLE"
-                              ? "Update contact"
-                              : "Import record"}
+                            {row.status === "ALREADY_SYNCED"
+                              ? "Re-import"
+                              : row.status === "UPDATE_AVAILABLE"
+                                ? "Update contact"
+                                : "Import record"}
                           </button>
                         )}
                       </td>
@@ -2583,11 +2649,19 @@ function ManualImporter({
         >
           <div className="ls-confirm-import">
             <Upload size={36} />
-            <h3>Ready to import your leads?</h3>
+            <h3>
+              {confirmation.reimport
+                ? "Ready to re-import synchronized leads?"
+                : "Ready to import your leads?"}
+            </h3>
             <p>
               Import{" "}
               <strong>
-                {confirmation.ids?.length ?? preview.summary.eligible} records
+                {confirmation.ids?.length ??
+                  (confirmation.reimport
+                    ? reimportCount
+                    : preview.summary.eligible)}{" "}
+                records
               </strong>{" "}
               from <strong>{preview.lead.name}</strong> into{" "}
               <strong>
@@ -2596,7 +2670,9 @@ function ManualImporter({
               .
             </p>
             <p>
-              Existing contacts are updated and unchanged records are skipped.
+              {confirmation.reimport
+                ? "Only unchanged synchronized records with a known Genesys Contact ID are selected. They will update the existing contacts; no new contacts are created."
+                : "Existing contacts are updated and unchanged records are skipped."}
             </p>
             <div className="pipe-form-actions">
               <button
@@ -2610,11 +2686,11 @@ function ManualImporter({
                 onClick={() => {
                   const ids = confirmation.ids;
                   setConfirmation(null);
-                  void start(ids, true);
+                  void start(ids, true, confirmation.reimport);
                 }}
               >
                 <Upload size={17} />
-                Confirm import
+                {confirmation.reimport ? "Confirm re-import" : "Confirm import"}
               </button>
             </div>
           </div>

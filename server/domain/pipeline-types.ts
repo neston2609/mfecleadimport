@@ -130,6 +130,7 @@ export type ImportJob = {
   id: string;
   leadId: string;
   leadName: string;
+  reimport?: boolean;
   sourceId?: string;
   contactListId: string;
   scheduleId: string;

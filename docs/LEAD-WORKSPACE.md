@@ -45,9 +45,11 @@ Date offsets use calendar days in **Asia/Bangkok**. Positive values are future d
 
 ### Manual Import
 
-Select a Lead Configuration to load current data automatically. The destination is the Contact List configured in its Source Mapping. Import individual records, selected records across pages, or every eligible record. Export CSV is also available.
+Select a Lead Configuration to load current data automatically. The Contact List configured in its Source Mapping is selected by default, but you can choose another list in the same Genesys region when its columns match the mapping destination. Import individual records, selected records across pages, or every eligible record. Unchanged synchronized records can be explicitly re-imported individually or with **Re-import All Synced**. Re-import updates the known Genesys Contact ID and never creates a duplicate. Export CSV is also available.
 
-The importer validates required fields, field types, phone numbers, duplicate keys/phones and source DNC flags. Unchanged contacts are skipped. Changed contacts retain their remote Contact ID and are updated while preserving unrelated Genesys contact properties. A conflicting destination is rejected to protect the mapping.
+The importer validates required fields, field types, phone numbers, duplicate keys/phones and source DNC flags. Unchanged contacts are skipped during normal imports. Re-import explicitly updates existing synced contacts in the selected destination. Changed contacts retain their remote Contact ID and are updated while preserving unrelated Genesys contact properties. A destination in another region or with mismatched columns is rejected to protect the mapping.
+
+Lead Configurations with linked schedules cannot be normally deleted. **Force delete** requires typing the exact Lead Configuration name, removes linked schedules, and preserves import history, contact identities and Genesys contacts. It cannot be used while an import or linked schedule is running.
 
 Import jobs run in the background and show progress. Recent history retains 100 jobs and the latest 200 per-record results in each job. A durable contact-identity journal is synchronized before creating remote contacts. Unknown creation outcomes are not automatically retried; after checking the destination, use **Reconcile** to link the existing Genesys Contact ID. Only one import/clear operation runs at a time; individual contacts are processed with bounded concurrency.
 
