@@ -410,6 +410,127 @@ test(
         },
       );
       await t.test(
+        "file imports validate columns and IDs, then safely import and re-import",
+        async () => {
+          const fileName = "file-import-customers.csv";
+          const content = [
+            "customer_id,name,phone,premium,expiry",
+            `file-1,File Alice,0851234567,50,${date(15)}`,
+          ].join("\n");
+          await assert.rejects(
+            pipeline.inspectFileImport(
+              listId,
+              fileName,
+              "id,phone\n1,0812345678",
+            ),
+            /fields do not match/i,
+          );
+          await assert.rejects(
+            pipeline.inspectFileImport(
+              listId,
+              fileName,
+              "x".repeat(5 * 1024 * 1024 + 1),
+            ),
+            /5 MB/i,
+          );
+          const duplicate = await pipeline.resolveFileImport(
+            listId,
+            fileName,
+            [
+              "customer_id,name,phone,premium,expiry",
+              `duplicate,First,0851234567,50,${date(15)}`,
+              `duplicate,Second,0861234567,50,${date(15)}`,
+            ].join("\n"),
+            "customer_id",
+          );
+          assert.equal(duplicate.summary.eligible, 0);
+          assert.equal(
+            duplicate.rows.every((row) => row.status === "DUPLICATE"),
+            true,
+          );
+
+          const inspection = await pipeline.inspectFileImport(
+            listId,
+            fileName,
+            content,
+          );
+          assert.deepEqual(inspection.fields, columns);
+          const jsonInspection = await pipeline.inspectFileImport(
+            listId,
+            "file-import-customers.json",
+            JSON.stringify([
+              {
+                customer_id: "json-1",
+                name: "JSON Alice",
+                phone: "0852234567",
+                premium: 75,
+                expiry: date(20),
+              },
+            ]),
+          );
+          assert.deepEqual(jsonInspection.fields, columns);
+          await assert.rejects(
+            pipeline.inspectFileImport(
+              listId,
+              "file-import-customers.json",
+              "not json",
+            ),
+            /Invalid JSON/i,
+          );
+          const preview = await pipeline.resolveFileImport(
+            listId,
+            fileName,
+            content,
+            "customer_id",
+          );
+          assert.equal(preview.summary.eligible, 1);
+          const postsBefore = posts;
+          const imported = await imports.awaitImport(
+            (
+              await imports.startFileImport(
+                {
+                  contactListId: listId,
+                  fileName,
+                  content,
+                  keyField: "customer_id",
+                  revision: preview.revision,
+                },
+                "test",
+              )
+            ).id,
+          );
+          assert.equal(imported.status, "SUCCESS");
+          assert.equal(imported.created, 1);
+          assert.equal(posts, postsBefore + 1);
+
+          const synced = await pipeline.resolveFileImport(
+            listId,
+            fileName,
+            content,
+            "customer_id",
+          );
+          assert.equal(synced.summary.synced, 1);
+          const reimport = await imports.awaitImport(
+            (
+              await imports.startFileImport(
+                {
+                  contactListId: listId,
+                  fileName,
+                  content,
+                  keyField: "customer_id",
+                  revision: synced.revision,
+                  reimport: true,
+                },
+                "test",
+              )
+            ).id,
+          );
+          assert.equal(reimport.updated, 1);
+          assert.equal(reimport.created, 0);
+          assert.equal(posts, postsBefore + 1);
+        },
+      );
+      await t.test(
         "ambiguous creations are not retried and can be reconciled to an existing contact",
         async () => {
           sourceRows.push({
@@ -419,6 +540,7 @@ test(
             amount: 500,
             expires: date(10),
           });
+          const postsBefore = posts;
           loseNextPost = true;
           const job = await imports.awaitImport(
             (
@@ -429,7 +551,7 @@ test(
             ).id,
           );
           assert.equal(job.failed, 1);
-          assert.equal(posts, 2);
+          assert.equal(posts, postsBefore + 1);
           let preview = await pipeline.resolveLead(lead.id, listId);
           const unknown = preview.rows.find((row) => row.sourceKey === "e")!;
           assert.equal(unknown.status, "UNKNOWN");
@@ -441,8 +563,12 @@ test(
               )
             ).id,
           );
-          assert.equal(posts, 2);
-          await imports.reconcileContact(unknown.id, "remote-2", "test");
+          assert.equal(posts, postsBefore + 1);
+          await imports.reconcileContact(
+            unknown.id,
+            `remote-${postsBefore + 1}`,
+            "test",
+          );
           preview = await pipeline.resolveLead(lead.id, listId);
           assert.equal(
             preview.rows.find((row) => row.sourceKey === "e")?.status,
@@ -461,7 +587,7 @@ test(
             ).id,
           );
           assert.equal(updated.updated, 1);
-          assert.equal(posts, 2);
+          assert.equal(posts, postsBefore + 1);
         },
       );
       await t.test(
@@ -790,6 +916,82 @@ test(
             postsBefore + 1,
             "re-import updates the known contact",
           );
+        },
+      );
+      await t.test(
+        "configuration restore validates backup, preserves local secrets and identities, and disables schedules",
+        async () => {
+          const backup = await business.createBackup();
+          const downloaded = await business.downloadBackup(backup.directory);
+          const files = Object.fromEntries(
+            Object.entries(downloaded).filter(
+              ([name]) =>
+                [
+                  "genesys-contact-list-configurations.json",
+                  "source-integrations.json",
+                  "source-mappings.json",
+                  "lead-definitions.json",
+                  "lead-import-schedules.json",
+                ].includes(name) || name.startsWith("source-files/"),
+            ),
+          ) as Record<string, unknown>;
+          const scheduleFile = files["lead-import-schedules.json"] as Record<
+            string,
+            unknown
+          >[];
+          files["lead-import-schedules.json"] = scheduleFile.map((schedule) =>
+            schedule.name === "Daily leads"
+              ? { ...schedule, enabled: true }
+              : schedule,
+          );
+          const beforeSources = await sourceIntegrations.all();
+          const beforeStates = await importStates.all();
+          const beforeLists = await contactListConfigurations.all();
+          await assert.rejects(
+            business.restoreConfigurationBackup(
+              { confirmation: "RESTORE", files: {} },
+              "test",
+            ),
+            /missing genesys-contact-list-configurations/i,
+          );
+          assert.deepEqual(await sourceIntegrations.all(), beforeSources);
+          const invalidDependency = structuredClone(files);
+          const invalidMappings = invalidDependency[
+            "source-mappings.json"
+          ] as Record<string, unknown>[];
+          invalidMappings[0] = {
+            ...invalidMappings[0],
+            sourceId: "99999999-9999-4999-8999-999999999999",
+          };
+          await assert.rejects(
+            business.restoreConfigurationBackup(
+              { confirmation: "RESTORE", files: invalidDependency },
+              "test",
+            ),
+            /references a missing source/i,
+          );
+          assert.deepEqual(await sourceIntegrations.all(), beforeSources);
+
+          const result = await business.restoreConfigurationBackup(
+            { confirmation: "RESTORE", files },
+            "test",
+          );
+          assert.ok(result.safetyBackup);
+          assert.ok(
+            (await importSchedules.all()).every(
+              (schedule) => !schedule.enabled,
+            ),
+          );
+          assert.deepEqual(await importStates.all(), beforeStates);
+          assert.deepEqual(await contactListConfigurations.all(), beforeLists);
+          const restoredSources = await sourceIntegrations.all();
+          for (const source of beforeSources) {
+            assert.equal(
+              restoredSources.find((item) => item.id === source.id)
+                ?.secretEncrypted,
+              source.secretEncrypted,
+            );
+          }
         },
       );
     } finally {

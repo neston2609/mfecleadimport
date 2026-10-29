@@ -210,6 +210,20 @@ test(
       ).json();
       assert.ok(download.files["source-integrations.json"]);
       assert.equal(download.files[".auth/admin.json"], undefined);
+      const restored = await request(
+        "/api/admin/settings/restore",
+        "POST",
+        { confirmation: "RESTORE", files: download.files },
+        cookie,
+      );
+      assert.equal(restored.status, 200, await restored.text());
+      const invalidRestore = await request(
+        "/api/admin/settings/restore",
+        "POST",
+        { confirmation: "RESTORE", files: {} },
+        cookie,
+      );
+      assert.equal(invalidRestore.status, 400);
       assert.equal(
         (
           await request("/api/admin/pipeline/sources", "POST", draft, cookie, {

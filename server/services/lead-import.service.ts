@@ -8,7 +8,12 @@ import type {
   LeadPreview,
   LeadRow,
 } from "../domain/pipeline-types";
-import { resolveLead, contactList, contactHash } from "./lead-pipeline.service";
+import {
+  resolveFileImport,
+  resolveLead,
+  contactList,
+  contactHash,
+} from "./lead-pipeline.service";
 import {
   genesysApiClient,
   GenesysApiError,
@@ -51,6 +56,11 @@ export async function clearLeadDestination(id: string, actor: string) {
 type Destination = Awaited<ReturnType<typeof contactList>>;
 const eligible = (row: LeadRow) =>
   ["ELIGIBLE", "UPDATE_AVAILABLE"].includes(row.status);
+type ImportSelection = {
+  recordIds?: string[];
+  revision?: string;
+  reimport?: boolean;
+};
 
 async function writeState(state: ImportState) {
   await importStates.set(state);
@@ -224,6 +234,116 @@ async function execute(
   }
 }
 
+async function queuePreviewImport(
+  preview: LeadPreview,
+  destination: Destination,
+  input: ImportSelection,
+  actor: string,
+  scheduleId = "",
+) {
+  if (preview.truncated)
+    throw httpError(
+      400,
+      "Source exceeds the 10,000 row or response limit. Narrow the source query before importing all records.",
+    );
+  if (input.revision && input.revision !== preview.revision)
+    throw httpError(
+      409,
+      "Source data or configuration changed. Refresh the preview before importing.",
+    );
+  const templateFields = new Set(
+    preview.destination.fields.map((field) => field.name),
+  );
+  if (
+    !destination.columnNames?.length ||
+    destination.columnNames.some((field) => !templateFields.has(field)) ||
+    preview.fields.some((field) => !destination.columnNames.includes(field))
+  )
+    throw httpError(
+      400,
+      "Mapping fields no longer match the Genesys Contact List. Refresh Contact List Configuration and edit this mapping.",
+    );
+  const phoneColumns = destination.phoneColumns || [];
+  if (!phoneColumns.length)
+    throw httpError(
+      400,
+      "The destination Contact List must contain a configured phone column",
+    );
+  const selected = input.recordIds ? new Set(input.recordIds) : null;
+  const canSelect = (row: LeadRow) =>
+    input.reimport === true
+      ? row.status === "ALREADY_SYNCED" && Boolean(row.contactId)
+      : eligible(row);
+  if (
+    selected &&
+    [...selected].some(
+      (id) => !preview.rows.some((row) => row.id === id && canSelect(row)),
+    )
+  )
+    throw httpError(
+      409,
+      "Some selected records are no longer eligible. Refresh the preview.",
+    );
+  const rows = preview.rows.filter(
+    (row) => canSelect(row) && (!selected || selected.has(row.id)),
+  );
+  for (const row of rows) {
+    if (input.reimport && (!row.contactId || row.status !== "ALREADY_SYNCED"))
+      throw httpError(
+        409,
+        `Record ${row.sourceKey} has no unchanged synchronized contact to re-import`,
+      );
+    if (
+      !phoneColumns.some((column) =>
+        /^\+?[1-9]\d{7,14}$/.test(
+          row.data[column.columnName]?.replace(/[\s().-]/g, "") || "",
+        ),
+      )
+    )
+      throw httpError(
+        400,
+        `Record ${row.sourceKey} has no valid destination phone number`,
+      );
+  }
+  const job: ImportJob = {
+    id: randomUUID(),
+    leadId: preview.lead.id,
+    leadName: preview.lead.name,
+    reimport: input.reimport === true,
+    sourceId: preview.mapping.sourceId,
+    contactListId: destination.id,
+    scheduleId,
+    status: "RUNNING",
+    total: rows.length,
+    processed: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    message: "Import starting",
+    results: [],
+    createdAt: new Date().toISOString(),
+    finishedAt: "",
+  };
+  await importJobs.mutate((jobs) => {
+    jobs.push(job);
+    if (jobs.length > 100) jobs.splice(0, jobs.length - 100);
+  });
+  activeJob = job.id;
+  const work = execute(
+    { ...job, results: [] },
+    preview,
+    rows,
+    destination,
+    actor,
+  );
+  running.set(job.id, work);
+  void work.catch((error) => {
+    console.error("Lead import storage failure", (error as Error).name);
+  });
+  return job;
+}
+
 export async function startImport(
   input: {
     leadId: string;
@@ -246,107 +366,47 @@ export async function startImport(
       resolveLead(input.leadId, input.contactListId),
       contactList(input.contactListId),
     ]);
-    if (preview.truncated)
-      throw httpError(
-        400,
-        "Source exceeds the 10,000 row or response limit. Narrow the source query before importing all records.",
-      );
-    if (input.revision && input.revision !== preview.revision)
-      throw httpError(
-        409,
-        "Source data or configuration changed. Refresh the preview before importing.",
-      );
-    const templateFields = new Set(
-      preview.destination.fields.map((field) => field.name),
-    );
-    if (
-      !destination.columnNames?.length ||
-      destination.columnNames.some((field) => !templateFields.has(field)) ||
-      preview.fields.some((field) => !destination.columnNames.includes(field))
-    )
-      throw httpError(
-        400,
-        "Mapping fields no longer match the Genesys Contact List. Refresh Contact List Configuration and edit this mapping.",
-      );
-    const phoneColumns = destination.phoneColumns || [];
-    if (!phoneColumns.length)
-      throw httpError(
-        400,
-        "The destination Contact List must contain a configured phone column",
-      );
-    const selected = input.recordIds ? new Set(input.recordIds) : null;
-    const canSelect = (row: LeadRow) =>
-      input.reimport === true
-        ? row.status === "ALREADY_SYNCED" && Boolean(row.contactId)
-        : eligible(row);
-    if (
-      selected &&
-      [...selected].some(
-        (id) => !preview.rows.some((row) => row.id === id && canSelect(row)),
-      )
-    )
-      throw httpError(
-        409,
-        "Some selected records are no longer eligible. Refresh the preview.",
-      );
-    const rows = preview.rows.filter(
-      (row) => canSelect(row) && (!selected || selected.has(row.id)),
-    );
-    for (const row of rows) {
-      if (input.reimport && (!row.contactId || row.status !== "ALREADY_SYNCED"))
-        throw httpError(
-          409,
-          `Record ${row.sourceKey} has no unchanged synchronized contact to re-import`,
-        );
-      if (
-        !phoneColumns.some((column) =>
-          /^\+?[1-9]\d{7,14}$/.test(
-            row.data[column.columnName]?.replace(/[\s().-]/g, "") || "",
-          ),
-        )
-      )
-        throw httpError(
-          400,
-          `Record ${row.sourceKey} has no valid destination phone number`,
-        );
-    }
-    const job: ImportJob = {
-      id: randomUUID(),
-      leadId: preview.lead.id,
-      leadName: preview.lead.name,
-      reimport: input.reimport === true,
-      sourceId: preview.mapping.sourceId,
-      contactListId: input.contactListId,
-      scheduleId,
-      status: "RUNNING",
-      total: rows.length,
-      processed: 0,
-      created: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      message: "Import starting",
-      results: [],
-      createdAt: new Date().toISOString(),
-      finishedAt: "",
-    };
-    await importJobs.mutate((jobs) => {
-      jobs.push(job);
-      if (jobs.length > 100) jobs.splice(0, jobs.length - 100);
-    });
-    activeJob = job.id;
-    const work = execute(
-      { ...job, results: [] },
+    return await queuePreviewImport(
       preview,
-      rows,
       destination,
+      input,
       actor,
+      scheduleId,
     );
-    running.set(job.id, work);
-    void work.catch((error) => {
-      console.error("Lead import storage failure", (error as Error).name);
-    });
-    return job;
+  } catch (error) {
+    activeJob = "";
+    throw error;
+  }
+}
+
+export async function startFileImport(
+  input: {
+    contactListId: string;
+    fileName: string;
+    content: string;
+    keyField: string;
+    revision: string;
+    reimport?: boolean;
+  },
+  actor: string,
+) {
+  if (activeJob)
+    throw httpError(409, "Another import is running. Wait for it to finish.");
+  activeJob = "PREPARING";
+  try {
+    const config = await new GenesysConfigService().getConfig();
+    if (!config.enabled || !config.clientId || !config.clientSecretEncrypted)
+      throw httpError(400, "Configure and enable Genesys integration first");
+    const [preview, destination] = await Promise.all([
+      resolveFileImport(
+        input.contactListId,
+        input.fileName,
+        input.content,
+        input.keyField,
+      ),
+      contactList(input.contactListId),
+    ]);
+    return await queuePreviewImport(preview, destination, input, actor);
   } catch (error) {
     activeJob = "";
     throw error;

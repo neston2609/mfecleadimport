@@ -9,7 +9,7 @@
 - Data: /var/lib/mfec-leadsync/data
 - Backups: /var/backups/mfec-leadsync
 
-The revised workspace uses `/contact-lists`, `/sources`, `/mappings`, `/leads`, `/integration`, `/regions`, `/manual-import` and `/schedule-import`. See [Lead Workspace](../docs/LEAD-WORKSPACE.md). Install JDK 21+ and run `npm run setup:jdbc` before enabling JDBC sources. Source uploads require the 12 MB Nginx body limit supplied in `mfecleadsync.nginx.conf`.
+The revised workspace uses `/contact-lists`, `/sources`, `/mappings`, `/leads`, `/integration`, `/regions`, `/manual-import`, `/file-import`, `/schedule-import` and `/settings`. File Import requires the Contact List to be selected before browsing; it checks matching columns and a unique record ID before previewing/importing CSV or JSON (maximum 5 MB and 10,000 rows). Configuration restore accepts downloaded MFEC JSON backups, makes a safety backup, preserves local credentials and contact identities, and restores schedules disabled. See [Lead Workspace](../docs/LEAD-WORKSPACE.md). Install JDK 21+ and run `npm run setup:jdbc` before enabling JDBC sources. Source uploads require the 12 MB Nginx body limit supplied in `mfecleadsync.nginx.conf`.
 
 The workspace uses root paths such as `/manual-import`, `/regions`, `/schedule-import`, and `/settings`. Previous `/genesys` page URLs permanently redirect to the corresponding root path, preserving query parameters. Genesys API URLs remain under `/api/admin/genesys`.
 

@@ -35,6 +35,11 @@ import { encryptSecret } from "./genesys/secret.service";
 import { genesysApiClient } from "./genesys/genesys-api.client";
 import { loadSource } from "./source-data.service";
 import { recordSourceObservation } from "./source-observation.service";
+import {
+  MAX_SOURCE_ROWS,
+  parseCsv,
+  selectJsonRows,
+} from "./source-data.service";
 
 const name = z.string().trim().min(1).max(120);
 const fieldName = z
@@ -672,6 +677,209 @@ export async function resolveLead(
         uuid: destination.uuid,
         fields: destination.fields,
       },
+      rows.map((row) => [row.sourceKey, row.data]),
+    ]),
+    summary: {
+      matched: rows.length,
+      eligible: rows.filter((row) =>
+        ["ELIGIBLE", "UPDATE_AVAILABLE"].includes(row.status),
+      ).length,
+      synced: rows.filter((row) => row.status === "ALREADY_SYNCED").length,
+      invalid: rows.filter(
+        (row) =>
+          !["ELIGIBLE", "UPDATE_AVAILABLE", "ALREADY_SYNCED"].includes(
+            row.status,
+          ),
+      ).length,
+    },
+  };
+}
+
+export async function inspectFileImport(
+  contactListId: string,
+  fileName: string,
+  content: string,
+) {
+  if (
+    !fileName.trim() ||
+    fileName.length > 255 ||
+    /[/\\]/.test(fileName) ||
+    !/\.(csv|json)$/i.test(fileName)
+  )
+    throw httpError(400, "Choose a CSV or JSON file with a valid file name");
+  const rows = parseFileRows(fileName, content);
+  const fileFields =
+    /\.csv$/i.test(fileName) && "columns" in rows
+      ? (rows as DataRow[] & { columns: string[] }).columns
+      : [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  const destination = await configuredContactList(contactListId, true);
+  const destinationFields = destination.fields.map((field) => field.name);
+  const missing = destinationFields.filter(
+    (field) => !fileFields.includes(field),
+  );
+  const unexpected = fileFields.filter(
+    (field) => !destinationFields.includes(field),
+  );
+  if (missing.length || unexpected.length)
+    throw httpError(
+      400,
+      `File fields do not match the selected Genesys Contact List. Missing: ${missing.join(", ") || "none"}. Unexpected: ${unexpected.join(", ") || "none"}.`,
+    );
+  return {
+    contactListId: destination.contactListId,
+    contactListName: destination.name,
+    fields: destinationFields,
+    total: rows.length,
+    truncated: rows.length > MAX_SOURCE_ROWS,
+  };
+}
+
+function parseFileRows(fileName: string, content: string): DataRow[] {
+  if (Buffer.byteLength(content, "utf8") > 5 * 1024 * 1024)
+    throw httpError(413, "Files must be 5 MB or smaller");
+  if (/\.csv$/i.test(fileName)) return parseCsv(content);
+  try {
+    return selectJsonRows(JSON.parse(content));
+  } catch (error) {
+    if ((error as { status?: number }).status) throw error;
+    throw httpError(400, "Invalid JSON file");
+  }
+}
+
+export async function resolveFileImport(
+  contactListId: string,
+  fileName: string,
+  content: string,
+  keyField: string,
+): Promise<LeadPreview> {
+  const [inspection, destination, states] = await Promise.all([
+    inspectFileImport(contactListId, fileName, content),
+    configuredContactList(contactListId, true),
+    importStates.all(),
+  ]);
+  if (!inspection.fields.includes(keyField))
+    throw httpError(400, "Choose a record ID field from the uploaded file");
+  const identityNamespace = digest([
+    "file-import",
+    destination.contactListId,
+    destination.regionId,
+    fileName.trim().toLocaleLowerCase(),
+    keyField,
+  ]);
+  const source: SourceIntegration = {
+    id: identityNamespace,
+    name: fileName,
+    kind: /\.csv$/i.test(fileName) ? "CSV" : "JSON",
+    config: { fileName },
+    fields: inspection.fields,
+    secretEncrypted: "",
+    identityNamespace,
+    createdAt: "",
+    updatedAt: "",
+  };
+  const mapping: SourceMapping = {
+    id: identityNamespace,
+    name: fileName,
+    contactListId: destination.contactListId,
+    regionId: destination.regionId,
+    sourceId: identityNamespace,
+    keyField,
+    fields: destination.fields.map((field) => ({
+      targetField: field.name,
+      sourceField: field.name,
+      defaultValue: "",
+      type: field.type,
+      required: field.required,
+    })),
+    createdAt: "",
+    updatedAt: "",
+  };
+  const lead: LeadDefinition = {
+    id: identityNamespace,
+    name: `File Import: ${fileName}`,
+    mappingId: identityNamespace,
+    match: "ALL",
+    filters: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+  const stateMap = new Map(states.map((state) => [state.id, state]));
+  const fileRows = parseFileRows(fileName, content);
+  const keyCounts = new Map<string, number>();
+  for (const raw of fileRows) {
+    const key = String(raw[keyField] ?? "").trim();
+    if (key) keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+  }
+  const rows = fileRows.map((raw, rowIndex): LeadRow => {
+    const rawKey = String(raw[keyField] ?? "").trim();
+    const sourceKey = rawKey.slice(0, 256);
+    const data: Record<string, string> = Object.create(null);
+    let message = "";
+    for (const field of destination.fields) {
+      try {
+        data[field.name] = mappedValue(raw[field.name], field);
+      } catch (error) {
+        data[field.name] =
+          raw[field.name] == null ? "" : String(raw[field.name]).slice(0, 4000);
+        message ||= (error as Error).message;
+      }
+    }
+    let status: LeadRow["status"] = "ELIGIBLE";
+    if (rawKey.length > 256) {
+      status = "INVALID";
+      message = "Record ID exceeds 256 characters";
+    } else if (!sourceKey) {
+      status = "INVALID";
+      message = "Record ID is empty";
+    } else if ((keyCounts.get(sourceKey) || 0) > 1) {
+      status = "DUPLICATE";
+      message = "Record ID is not unique in this file";
+    } else if (message) status = "INVALID";
+    else if (["true", "1"].includes(String(raw.dnc ?? "").toLowerCase())) {
+      status = "DNC";
+      message = "Record is marked Do Not Call";
+    }
+    const id = stateKey(
+      identityNamespace,
+      sourceKey || `invalid-row-${rowIndex}`,
+      destination.uuid,
+    );
+    const state = stateMap.get(id);
+    if (status === "ELIGIBLE" && state) {
+      if (["UNKNOWN", "PENDING"].includes(state.status)) {
+        status = "UNKNOWN";
+        message = state.message || "Previous request has an unknown outcome";
+      } else if (
+        state.status === "SYNCED" &&
+        state.payloadHash === contactHash(data)
+      ) {
+        status = "ALREADY_SYNCED";
+      } else if (state.contactId) status = "UPDATE_AVAILABLE";
+    }
+    return {
+      id,
+      sourceKey,
+      data,
+      source: raw,
+      status,
+      message,
+      contactId: state?.contactId || "",
+    };
+  });
+  return {
+    lead,
+    mapping,
+    destination,
+    fields: destination.fields.map((field) => field.name),
+    rows,
+    total: rows.length,
+    sourceTotal: rows.length,
+    truncated: rows.length > MAX_SOURCE_ROWS,
+    revision: digest([
+      identityNamespace,
+      destination.uuid,
+      destination.regionId,
+      destination.fields,
       rows.map((row) => [row.sourceKey, row.data]),
     ]),
     summary: {

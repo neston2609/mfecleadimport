@@ -16,6 +16,8 @@ import {
   contactLists,
   contactList,
   resolveLead,
+  resolveFileImport,
+  inspectFileImport,
   entity,
   publicSource,
 } from "../services/lead-pipeline.service";
@@ -27,6 +29,7 @@ import {
 import { loadSource } from "../services/source-data.service";
 import {
   startImport,
+  startFileImport,
   reconcileContact,
   clearLeadDestination,
   exclusiveDestinationAction,
@@ -169,6 +172,63 @@ pipelineRouter.get("/leads/:id/export", async (request, response) => {
     'attachment; filename="lead-export.csv"',
   );
   response.send("\uFEFF" + lines.join("\r\n") + "\r\n");
+});
+const fileImportInput = z
+  .object({
+    contactListId: z.string().trim().min(1).max(200),
+    fileName: z.string().trim().min(1).max(255),
+    content: z
+      .string()
+      .min(1)
+      .max(5 * 1024 * 1024),
+    keyField: z.string().trim().min(1).max(128).optional(),
+    revision: z.string().max(100).optional(),
+    reimport: z.boolean().optional(),
+  })
+  .strict();
+pipelineRouter.post("/file-import/inspect", async (request, response) => {
+  const data = fileImportInput
+    .pick({ contactListId: true, fileName: true, content: true })
+    .parse(request.body);
+  response.json(
+    await inspectFileImport(data.contactListId, data.fileName, data.content),
+  );
+});
+pipelineRouter.post("/file-import/preview", async (request, response) => {
+  const data = fileImportInput
+    .pick({
+      contactListId: true,
+      fileName: true,
+      content: true,
+      keyField: true,
+    })
+    .required({ keyField: true })
+    .parse(request.body);
+  const preview = await resolveFileImport(
+    data.contactListId,
+    data.fileName,
+    data.content,
+    data.keyField,
+  );
+  response.json({
+    ...preview,
+    rows: preview.rows.slice(0, 100),
+    previewCount: Math.min(100, preview.rows.length),
+  });
+});
+pipelineRouter.post("/file-import", async (request, response) => {
+  const data = fileImportInput
+    .required({ keyField: true, revision: true })
+    .parse(request.body);
+  response.status(202).json(
+    await startFileImport(
+      data as z.infer<typeof fileImportInput> & {
+        keyField: string;
+        revision: string;
+      },
+      request.user!.name,
+    ),
+  );
 });
 pipelineRouter.post("/imports", async (request, response) => {
   const data = z

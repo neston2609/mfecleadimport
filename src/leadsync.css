@@ -247,7 +247,7 @@ button:disabled {
 }
 .leadsync-theme.admin-shell {
   display: grid;
-  grid-template-columns: 310px minmax(0, 1fr);
+  grid-template-columns: 340px minmax(0, 1fr);
   grid-template-rows: 64px minmax(0, 1fr);
   min-height: 100svh;
   background: #f0f7ff;
@@ -645,6 +645,69 @@ button:disabled {
   box-shadow: 0 3px 14px #4b7db803;
   padding: 22px;
   min-width: 0;
+}
+.leadsync-theme .ls-file-import .pipe-field-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.leadsync-theme .ls-file-import .pipe-field-grid label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.leadsync-theme .ls-file-import .pipe-field-grid select,
+.leadsync-theme .ls-file-import .pipe-field-grid input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #d8e1e5;
+  border-radius: 5px;
+  background: #fff;
+  color: #26383e;
+}
+.leadsync-theme .ls-file-import .pipe-field-grid em {
+  color: #bc4657;
+  font-style: normal;
+}
+.leadsync-theme .ls-file-import .ls-import-actions {
+  justify-content: flex-start;
+  margin-bottom: 0;
+}
+.leadsync-theme .ls-file-picker {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  font-size: 13px;
+}
+.leadsync-theme .ls-file-picker input {
+  width: 100%;
+}
+.leadsync-theme .pipe-import-progress progress {
+  width: 100%;
+  height: 10px;
+  accent-color: #0068ff;
+}
+.leadsync-theme .pipe-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid #e4edf8;
+  border-radius: 8px;
+}
+.leadsync-theme .pipe-table-scroll .admin-table {
+  min-width: 100%;
+}
+.leadsync-theme .pipe-table-scroll .admin-table td {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.leadsync-theme .pipe-warning {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 7px;
+  background: #fff5e0;
+  color: #9a6b20;
 }
 .leadsync-theme .admin-panel h2,
 .leadsync-theme .admin-panel h3 {
@@ -1259,7 +1322,7 @@ button:disabled {
 }
 @media (max-width: 1250px) {
   .leadsync-theme.admin-shell {
-    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-columns: 320px minmax(0, 1fr);
   }
   .ls-import-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -1372,7 +1435,7 @@ button:disabled {
   }
   .leadsync-theme .admin-sidebar {
     position: fixed;
-    width: min(310px, calc(100vw - 16px));
+    width: min(340px, calc(100vw - 16px));
     left: 0;
     top: 64px;
     transform: translateX(-100%);
@@ -1589,6 +1652,9 @@ button:disabled {
     grid-template-columns: 1fr;
   }
   .leadsync-theme .pipe-field-grid {
+    grid-template-columns: 1fr;
+  }
+  .leadsync-theme .ls-file-import .pipe-field-grid {
     grid-template-columns: 1fr;
   }
   .ls-header-popover {

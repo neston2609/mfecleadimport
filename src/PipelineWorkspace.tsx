@@ -67,6 +67,7 @@ type Page =
   | "mappings"
   | "leads"
   | "manual-import"
+  | "file-import"
   | "schedule-import";
 type DraftSource = {
   id?: string;
@@ -96,6 +97,10 @@ const titles: Record<Page, [string, string]> = {
   "manual-import": [
     "Manual Lead Import",
     "Preview, validate, and import leads to Genesys Cloud",
+  ],
+  "file-import": [
+    "File Import",
+    "Choose a Genesys Contact List and preview a CSV or JSON file before importing.",
   ],
   "schedule-import": [
     "Schedule Import",
@@ -357,7 +362,14 @@ export function PipelineWorkspace({ page }: { page: Page }) {
         if (active) {
           setData(value);
           setLoading(false);
-          if (["mappings", "manual-import", "schedule-import"].includes(page)) {
+          if (
+            [
+              "mappings",
+              "manual-import",
+              "file-import",
+              "schedule-import",
+            ].includes(page)
+          ) {
             void api<{ items: ContactListConfiguration[] }>(
               endpoint + "/contact-lists",
             )
