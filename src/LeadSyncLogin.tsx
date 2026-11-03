@@ -62,10 +62,6 @@ export function LeadSyncLogin({
           src="/images/leadsync-login-hero.png"
           alt="MFEC LeadSync. Turn Data into Opportunities. Connect, Transform, Engage. Unify customer leads from Database, Web Service, CSV and JSON, and activate campaigns in Genesys Cloud."
         />
-        <div className="ls-hero-brand">
-          <MfecBrand />
-          <small>INTEGRATE · MANAGE · ACTIVATE</small>
-        </div>
       </aside>
       <main className="ls-login-side">
         <div className="ls-login-preferences">
