@@ -10,7 +10,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { api } from "./lib/api";
-import { MfecBrand, ThemeToggle } from "./Theme";
+import { ThemeToggle } from "./Theme";
 import { Footer } from "./Footer";
 
 export function LeadSyncLogin({
@@ -71,7 +71,6 @@ export function LeadSyncLogin({
           </div>
         </div>
         <div className="ls-login-form-wrap">
-          <MfecBrand className="ls-login-brand" />
           <div className="ls-login-eyebrow">MFEC LEADSYNC</div>
           <h1>Welcome back</h1>
           <p className="ls-login-subtitle">Sign in to MFEC LeadSync</p>
