@@ -11,6 +11,12 @@ const auditLog = new JsonRepository<{
 export async function initializeAudit() {
   await auditLog.initialize();
 }
+export async function readAuditLog() {
+  return auditLog.all();
+}
+export async function replaceAuditLog(rows: Awaited<ReturnType<typeof auditLog.all>>) {
+  await auditLog.replaceAll(rows);
+}
 export async function audit(
   action: string,
   actor: string,

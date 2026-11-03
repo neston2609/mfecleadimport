@@ -23,6 +23,14 @@ const pages = [
   ["Integration Setting", "/integration"],
   ["Manual Import", "/manual-import"],
   ["Schedule Import", "/schedule-import"],
+  ["Alert Dashboard", "/alerts-dashboard"],
+  ["SNMP Configuration", "/snmp-configuration"],
+  ["Alert Configuration", "/alert-configuration"],
+  ["Enrichment Datasource", "/enrichment-datasource"],
+  ["Alert Enrichment", "/alert-enrichment"],
+  ["Alert Mapping", "/alert-mapping"],
+  ["Alert Inbox / Manual Sync", "/alert-inbox"],
+  ["Sync History", "/alert-history"],
   ["System settings", "/settings"],
 ];
 export function LeadSyncHeader({

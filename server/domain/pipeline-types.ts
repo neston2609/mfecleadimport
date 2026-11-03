@@ -20,6 +20,7 @@ export type SourceConfig = {
   driverClass?: string;
   username?: string;
   query?: string;
+  queryParameters?: Record<string, string>;
   table?: string;
   uri?: string;
   method?: "GET" | "POST";

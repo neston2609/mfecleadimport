@@ -18,6 +18,12 @@ import { pipelineRouter } from "./routes/pipeline.routes";
 import { initializePipeline } from "./domain/pipeline-store";
 import { startLeadScheduler } from "./services/lead-schedule.service";
 import { upgradeWorkspace } from "./services/workspace-upgrade.service";
+import { alertRouter, alertIngestRouter } from "./routes/alert.routes";
+import { initializeAlertStore } from "./domain/alert-store";
+import { initializeSnmpListener } from "./services/snmp-listener.service";
+import { startAlertWorker } from "./services/alert-processing.service";
+import { recoverAlertAttempts } from "./services/alert-mapping.service";
+import { recoverAlertProcessingAttempts } from "./services/alert-processing.service";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,7 +44,12 @@ if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
 }
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: "12mb" }));
+app.use(express.json({
+  limit: "12mb",
+  verify: (request, _response, buffer) => {
+    (request as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+  },
+}));
 app.use(
   session({
     name: "genesys.sid",
@@ -93,6 +104,8 @@ app.use("/api/admin/genesys", genesysAdminRouter);
 app.use("/api/admin/auth", authRouter);
 
 app.use("/api/admin/pipeline", pipelineRouter);
+app.use("/api/admin/alerts", alertRouter);
+app.use("/api/v1/alerts/ingest", alertIngestRouter);
 app.use("/api/admin", adminDataRouter);
 app.use("/api", (_request, response) =>
   response.status(404).json({ message: "API endpoint not found" }),
@@ -153,9 +166,14 @@ await adminCredentials.initialize();
 await genesysRegionService.initialize();
 await initializeAudit();
 await initializePipeline();
+await initializeAlertStore();
+await recoverAlertAttempts();
+await recoverAlertProcessingAttempts();
 await upgradeWorkspace();
 
 await startLeadScheduler();
+await initializeSnmpListener();
+await startAlertWorker();
 
 app.listen(port, host, () => {
   console.log(`genesys listening on ${host}:${port}`);

@@ -64,10 +64,18 @@ public class JdbcBridge {
           query = "SELECT * FROM " + table;
         }
         int limit = Integer.parseInt(input.getProperty("limit", "10001"));
-        try (Statement statement = connection.createStatement()) {
-          statement.setQueryTimeout(20);
-          statement.setMaxRows(limit);
-          try (ResultSet result = statement.executeQuery(query)) {
+         String encodedParameters = input.getProperty("queryParameters", "");
+         try (PreparedStatement statement = connection.prepareStatement(query)) {
+           if (!encodedParameters.isBlank()) {
+             List<String> parameters = new ArrayList<>();
+             for (String parameter : encodedParameters.split(",", -1))
+               parameters.add(new String(Base64.getDecoder().decode(parameter), StandardCharsets.UTF_8));
+             if (parameters.size() > 100) throw new SQLException("Too many query parameters");
+             for (int i = 0; i < parameters.size(); i++) statement.setString(i + 1, parameters.get(i));
+           }
+           statement.setQueryTimeout(20);
+           statement.setMaxRows(limit);
+           try (ResultSet result = statement.executeQuery()) {
             ResultSetMetaData columns = result.getMetaData();
             List<String> fields = new ArrayList<>();
             for (int i = 1; i <= columns.getColumnCount(); i++) {

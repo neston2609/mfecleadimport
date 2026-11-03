@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   Home,
+  Bell,
   Network,
   Database,
   Filter,
@@ -34,6 +35,7 @@ import type {
   ImportJob,
   LeadPreview,
 } from "../server/domain/pipeline-types";
+import { AlertWorkspace } from "./AlertWorkspace";
 const base = "/api/admin";
 type Portal = "genesys";
 const navigationGroups = [
@@ -71,6 +73,19 @@ const navigationGroups = [
       { key: "manual-import", label: "Manual Import Lead", icon: CloudUpload },
       { key: "file-import", label: "File Import", icon: FileSpreadsheet },
       { key: "schedule-import", label: "Schedule Import", icon: CalendarDays },
+    ],
+  },
+  {
+    label: "Alert to Lead",
+    items: [
+      { key: "alerts-dashboard", label: "Alert Dashboard", icon: Bell },
+      { key: "snmp-configuration", label: "SNMP Configuration", icon: Network },
+      { key: "alert-configuration", label: "Alert Configuration", icon: Settings },
+      { key: "enrichment-datasource", label: "Enrichment Datasource", icon: Database },
+      { key: "alert-enrichment", label: "Alert Enrichment", icon: Filter },
+      { key: "alert-mapping", label: "Alert Mapping", icon: MapPin },
+      { key: "alert-inbox", label: "Alert Inbox / Manual Sync", icon: Bell },
+      { key: "alert-history", label: "Sync History", icon: CalendarDays },
     ],
   },
   {
@@ -205,7 +220,9 @@ function AdminPortal({
           </span>
         </div>
         <main className="admin-content">
-          {[
+          {section.startsWith("alert-") || section === "snmp-configuration" || section === "enrichment-datasource" ? (
+            <AlertWorkspace page={section} />
+          ) : [
             "overview",
             "sources",
             "mappings",

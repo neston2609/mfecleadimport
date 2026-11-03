@@ -290,6 +290,49 @@ export function assertReadQuery(query: string) {
   return sql;
 }
 
+export function bindNamedQueryParameters(
+  query: string,
+  parameters: Record<string, string>,
+) {
+  const sql = assertReadQuery(query);
+  const values: string[] = [];
+  const used = new Set<string>();
+  let output = "";
+  let quote = "";
+  for (let index = 0; index < sql.length; index++) {
+    const character = sql[index];
+    if (quote) {
+      output += character;
+      if (character === quote) {
+        if (sql[index + 1] === quote) output += sql[++index];
+        else quote = "";
+      }
+      continue;
+    }
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+      output += character;
+      continue;
+    }
+    if (character === ":" && /[A-Za-z_]/.test(sql[index + 1] || "")) {
+      let end = index + 2;
+      while (/[A-Za-z0-9_]/.test(sql[end] || "")) end++;
+      const name = sql.slice(index + 1, end);
+      if (!Object.hasOwn(parameters, name))
+        throw httpError(400, `Missing named query parameter: ${name}`);
+      values.push(parameters[name]);
+      used.add(name);
+      output += "?";
+      index = end - 1;
+      continue;
+    }
+    output += character;
+  }
+  const unused = Object.keys(parameters).filter((name) => !used.has(name));
+  if (unused.length) throw httpError(400, `Query parameter is not used: ${unused[0]}`);
+  return { query: output, parameters: values };
+}
+
 let jdbcBusy = false;
 export async function jdbcData(
   source: SourceIntegration,
@@ -345,6 +388,9 @@ async function executeJdbc(
     !connectOnly && source.config.query?.trim()
       ? assertReadQuery(source.config.query)
       : "";
+  const bound = query && (source.config.queryParameters || source.config.query?.includes(":"))
+    ? bindNamedQueryParameters(query, source.config.queryParameters || {})
+    : { query, parameters: [] as string[] };
   if (!connectOnly && !query && !source.config.table)
     throw httpError(
       400,
@@ -355,7 +401,8 @@ async function executeJdbc(
     driverClass: source.config.driverClass || "",
     username: source.config.username || "",
     password: decryptSecret(source.secretEncrypted),
-    query,
+    query: bound.query,
+    queryParameters: bound.parameters.map((value) => Buffer.from(value).toString("base64")).join(","),
     table: source.config.table || "",
     action: connectOnly ? "connect" : "preview",
     limit: String(MAX_SOURCE_ROWS + 1),

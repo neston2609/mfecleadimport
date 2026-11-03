@@ -86,7 +86,8 @@ export class GenesysApiClient {
       regionId: draft?.regionId || config.regionId,
     });
     const url = joinUrl(region.apiBaseUrl, endpoint);
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const maxAttempts = method === "POST" ? 1 : 3;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const token = await this.getAccessToken(draft);
       let response: Response;
       try {
@@ -107,21 +108,31 @@ export class GenesysApiClient {
           await delay(250 * (attempt + 1));
           continue;
         }
+        if (method === "POST")
+          throw new GenesysApiError(0, "Genesys POST outcome is unknown after a network error");
         throw error;
       }
       if (response.ok) {
         if (response.status === 204) return null as T;
-        const payload = await response.text();
-        return (payload ? JSON.parse(payload) : null) as T;
+        let payload: string;
+        try { payload = await response.text(); }
+        catch {
+          if (method === "POST") throw new GenesysApiError(0, "Genesys POST succeeded but its response could not be read; outcome is unknown");
+          throw new GenesysApiError(response.status, "Genesys API response could not be read");
+        }
+        try { return (payload ? JSON.parse(payload) : null) as T; }
+        catch {
+          if (method === "POST") throw new GenesysApiError(0, "Genesys POST succeeded but returned an unreadable response; outcome is unknown");
+          throw new GenesysApiError(response.status, "Genesys API returned an invalid JSON response");
+        }
       }
       if (response.status === 401 && !draft && attempt === 0) {
         tokenCacheService.clear();
         continue;
       }
       if (
-        method !== "POST" &&
         [429, 502, 503, 504].includes(response.status) &&
-        attempt < 2
+        method !== "POST" && attempt < 2
       ) {
         const retryAfter = Number(response.headers.get("Retry-After") || 0);
         await delay(
