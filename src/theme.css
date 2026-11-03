@@ -570,15 +570,4 @@
   .ls-login-preferences .ls-theme-toggle > span {
     display: inline;
   }
-  .ls-login-brand {
-    display: inline-flex;
-    margin: 0 0 25px;
-  }
-  .ls-login-brand > img {
-    width: 90px;
-    height: 30px;
-  }
-  .ls-login-brand > span {
-    font-size: 24px;
-  }
 }

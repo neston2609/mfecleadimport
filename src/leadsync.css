@@ -75,9 +75,6 @@ button:disabled {
   margin: 0;
   color: var(--ls-text);
 }
-.ls-login-brand {
-  display: none;
-}
 .ls-language {
   display: flex;
   gap: 10px;
@@ -1801,17 +1798,6 @@ button:disabled {
   }
   .ls-login-preferences {
     margin-bottom: clamp(8px, 2vh, 16px);
-  }
-  .ls-login-brand {
-    display: inline-flex;
-    margin: 0 0 20px;
-  }
-  .ls-login-brand > img {
-    width: 90px;
-    height: 30px;
-  }
-  .ls-login-brand > span {
-    font-size: 24px;
   }
   .ls-login-form-wrap {
     width: 100%;
