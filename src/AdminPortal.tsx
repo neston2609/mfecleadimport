@@ -141,6 +141,7 @@ function AdminPortal({
       } as Record<string, string>
     )[requested] || requested;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [openNavGroup, setOpenNavGroup] = useState(() => navigationGroups.findIndex((group) => group.label && group.items.some((item) => item.key === section)));
   const navigation = navigationGroups.flatMap((group) => group.items);
   async function logout() {
     await api(base + "/auth/logout", {
@@ -167,13 +168,18 @@ function AdminPortal({
         <nav aria-label="Main navigation">
           {navigationGroups.map((group, index) =>
             group.label ? (
-              <details key={index} className="ls-nav-section" open>
-                <summary>
+              <div key={index} className="ls-nav-section">
+                <button
+                  type="button"
+                  className="ls-nav-section-toggle"
+                  aria-expanded={openNavGroup === index}
+                  onClick={() => setOpenNavGroup((current) => current === index ? -1 : index)}
+                >
                   <Network size={19} />
                   <span>{group.label}</span>
                   <ChevronDown size={15} />
-                </summary>
-                <div className="ls-nav-children">
+                </button>
+                {openNavGroup === index && <div className="ls-nav-children">
                   {group.items.map(({ key, label, icon: Icon }) => (
                     <a
                       href={"/" + key}
@@ -185,8 +191,8 @@ function AdminPortal({
                       {label}
                     </a>
                   ))}
-                </div>
-              </details>
+                </div>}
+              </div>
             ) : (
               <div className="ls-nav-section" key={index}>
                 {group.items.map(({ key, label, icon: Icon }) => (
@@ -220,7 +226,7 @@ function AdminPortal({
           </span>
         </div>
         <main className="admin-content">
-          {section.startsWith("alert-") || section === "snmp-configuration" || section === "enrichment-datasource" ? (
+          {section.startsWith("alert-") || section === "alerts-dashboard" || section === "snmp-configuration" || section === "enrichment-datasource" ? (
             <AlertWorkspace page={section} />
           ) : [
             "overview",

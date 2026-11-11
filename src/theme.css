@@ -237,6 +237,7 @@
   .leadsync-theme
   input:not([type="checkbox"]):not([type="radio"]),
 [data-theme="dark"] .leadsync-theme :is(select, textarea),
+[data-theme="dark"] .leadsync-theme .alert-field select,
 [data-theme="dark"] .ls-login-input,
 [data-theme="dark"]
   .genesys-admin
@@ -244,6 +245,65 @@
   background: var(--ls-input);
   color: var(--ls-text);
   border-color: var(--ls-border);
+}
+[data-theme="dark"] .leadsync-theme .alert-field select option {
+  background: var(--ls-panel);
+  color: var(--ls-text);
+}
+[data-theme="dark"] .leadsync-theme .alert-workspace {
+  color: var(--ls-text);
+}
+[data-theme="dark"] .leadsync-theme .alert-field,
+[data-theme="dark"] .leadsync-theme .alert-check,
+[data-theme="dark"] .leadsync-theme .alert-version-pills label {
+  color: var(--ls-text);
+}
+[data-theme="dark"] .leadsync-theme .alert-version-pills label {
+  background: var(--ls-raised);
+  border-color: var(--ls-border);
+}
+[data-theme="dark"] .leadsync-theme .alert-help {
+  color: var(--ls-muted);
+}
+[data-theme="dark"] .leadsync-theme .alert-section-title {
+  color: #d7e5fb;
+  border-color: var(--ls-border);
+}
+[data-theme="dark"] .leadsync-theme .alert-field-card {
+  background: var(--ls-raised);
+  border-color: var(--ls-border);
+}
+[data-theme="dark"] .leadsync-theme .alert-kpi {
+  background: var(--ls-panel);
+  border-color: var(--ls-border);
+  box-shadow: none;
+}
+[data-theme="dark"] .leadsync-theme .alert-field-card-head,
+[data-theme="dark"] .leadsync-theme .alert-kpi span,
+[data-theme="dark"] .leadsync-theme .alert-kpi strong,
+[data-theme="dark"] .leadsync-theme .alert-table td {
+  color: var(--ls-text);
+}
+[data-theme="dark"] .leadsync-theme .alert-table-wrap,
+[data-theme="dark"] .leadsync-theme .alert-table th,
+[data-theme="dark"] .leadsync-theme .alert-table td {
+  border-color: var(--ls-border);
+}
+[data-theme="dark"] .leadsync-theme .alert-table th {
+  background: var(--ls-raised);
+  color: var(--ls-muted);
+}
+[data-theme="dark"] .leadsync-theme .alert-table tr:hover td {
+  background: #1b304b;
+}
+[data-theme="dark"] .leadsync-theme .alert-subpanel pre {
+  background: var(--ls-raised);
+  color: var(--ls-text);
+}
+[data-theme="dark"] .leadsync-theme :is(.alert-notice, .alert-error) {
+  background: var(--ls-raised);
+  border-color: var(--ls-border);
+  color: var(--ls-text);
 }
 [data-theme="dark"] .schema-table > div:first-child {
   background: var(--ls-raised);
