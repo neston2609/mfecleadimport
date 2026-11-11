@@ -30,6 +30,12 @@ export type AlertFieldDefinition = {
   defaultValue: string;
   description: string;
   sensitive?: boolean;
+  extract?: {
+    mode: "FULL" | "REGEX" | "BETWEEN";
+    expression: string;
+    after: string;
+    group: number;
+  };
 };
 export type AlertConfiguration = Entity & {
   type: AlertTransport;

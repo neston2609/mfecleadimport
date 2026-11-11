@@ -22,7 +22,7 @@ test("Alert ingestion, isolated capture, enrichment, dedupe and approved Genesys
   let posts = 0;
   let failNextPost = false;
   try {
-    const [auditStore, alertStore, pipelineStore, regions, configModule, secretModule, contactService, rules, enrichment, mapping, processing, snmp, business] = await Promise.all([
+    const [auditStore, alertStore, pipelineStore, regions, configModule, secretModule, contactService, rules, enrichment, mapping, processing, snmp, ruleService, business] = await Promise.all([
       import("../server/domain/store"),
       import("../server/domain/alert-store"),
       import("../server/domain/pipeline-store"),
@@ -35,6 +35,7 @@ test("Alert ingestion, isolated capture, enrichment, dedupe and approved Genesys
       import("../server/services/alert-mapping.service"),
       import("../server/services/alert-processing.service"),
       import("../server/services/snmp-listener.service"),
+      import("../server/services/alert-rules.service"),
       import("../server/domain/business"),
     ]);
     await auditStore.initializeAudit();
@@ -89,6 +90,10 @@ test("Alert ingestion, isolated capture, enrichment, dedupe and approved Genesys
       allowedSources: [],
       api: { auth: "BEARER", token: "test-ingest-token", maxBodyBytes: 1048576 },
     }, "test");
+    const sampleConfig = { ...config, fields: [{ name: "device", source: "oid:1.3.6.1.4.1.9.1", type: "STRING" as const, required: false, defaultValue: "", description: "", extract: { mode: "REGEX" as const, expression: "Device\\s+([\\w-]+)", after: "", group: 1 } }] };
+    assert.equal(ruleService.createAlertFields(sampleConfig as unknown as import("../server/domain/alert-types").AlertConfiguration, { "oid:1.3.6.1.4.1.9.1": "Device router-7 is down" }).device, "router-7");
+    const arrayConfig = { ...config, fields: [{ name: "serial", source: "items.0.serial", type: "STRING" as const, required: false, defaultValue: "", description: "" }] };
+    assert.equal(ruleService.createAlertFields(arrayConfig as unknown as import("../server/domain/alert-types").AlertConfiguration, { items: [{ serial: "serial-42" }] }).serial, "serial-42");
 
     const first = await rules.acceptAlert({
       transport: "API", sourceIp: "127.0.0.1", sourcePort: 43000,

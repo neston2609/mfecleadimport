@@ -6,6 +6,7 @@ import type {
   AlertCondition,
   AlertConditionGroup,
   AlertConfiguration,
+  AlertFieldDefinition,
   AlertValue,
   ReceivedAlert,
 } from "../domain/alert-types";
@@ -45,6 +46,12 @@ const field = z.object({
   defaultValue: z.string().max(2000).default(""),
   description: z.string().max(500).default(""),
   sensitive: z.boolean().optional(),
+  extract: z.object({
+    mode: z.enum(["FULL", "REGEX", "BETWEEN"]).default("FULL"),
+    expression: z.string().max(200).default(""),
+    after: z.string().max(100).default(""),
+    group: z.number().int().min(0).max(10).default(1),
+  }).optional(),
 });
 const inputSchema = z.object({
   name,
@@ -78,9 +85,8 @@ export function resolveAlertPath(fields: Record<string, AlertValue>, field: stri
   let result: AlertValue | undefined = fields;
   for (const part of field.split(".")) {
     if (["__proto__", "prototype", "constructor"].includes(part)) return undefined;
-    result = result && typeof result === "object" && !Array.isArray(result)
-      ? result[part]
-      : undefined;
+    if (Array.isArray(result) && /^(?:0|[1-9]\d*)$/.test(part)) result = result[Number(part)];
+    else result = result && typeof result === "object" && !Array.isArray(result) ? result[part] : undefined;
   }
   return result;
 }
@@ -116,10 +122,27 @@ export function createAlertFields(config: AlertConfiguration, raw: Record<string
   const result: Record<string, AlertValue> = Object.create(null);
   for (const definition of config.fields) {
     const value = resolveAlertPath(raw, definition.source);
-    const selected = value === undefined || value === null || value === "" ? definition.defaultValue || null : value;
+    const extracted = extractAlertField(value, definition.extract);
+    const selected = extracted === undefined || extracted === null || extracted === "" ? definition.defaultValue || null : extracted;
     result[definition.name] = selected === null ? null : coerceAlertValue(selected, definition.type);
   }
   return result;
+}
+
+export function extractAlertField(value: AlertValue | undefined, extraction?: AlertFieldDefinition["extract"]): AlertValue | undefined {
+  if (value === undefined || value === null || !extraction || extraction.mode === "FULL") return value;
+  const text = typeof value === "string" ? value : String(value);
+  if (extraction.mode === "REGEX") {
+    if (!extraction.expression || !regexIsSafe(extraction.expression)) return null;
+    try { return new RegExp(extraction.expression).exec(text)?.[extraction.group] ?? null; }
+    catch { return null; }
+  }
+  if (!extraction.expression || !extraction.after) return null;
+  const start = text.indexOf(extraction.expression);
+  if (start < 0) return null;
+  const contentStart = start + extraction.expression.length;
+  const end = text.indexOf(extraction.after, contentStart);
+  return end < 0 ? null : text.slice(contentStart, end);
 }
 
 export function coerceAlertValue(value: AlertValue, type: string): AlertValue {

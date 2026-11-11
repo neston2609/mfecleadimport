@@ -34,7 +34,19 @@
 .alert-toolbar input { width: 175px; }
 .alert-toolbar select { width: auto; min-width: 140px; }
 .alert-danger { color: #b52e40 !important; border-color: #f0c7cd !important; }
+.alert-config-editor { display: grid; gap: 20px; width: 100%; }
+.alert-config-editor > .alert-panel-head { align-items: flex-start; }
+.alert-config-editor .alert-form { align-items: start; }
+.alert-section-title { grid-column: 1 / -1; margin-top: 8px; padding: 14px 0 9px; border-bottom: 1px solid #dce6f5; color: #18315d; font-size: 15px; font-weight: 700; }
+.alert-field-list { display: grid; gap: 12px; }
+.alert-field-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; border: 1px solid #dce6f5; border-radius: 9px; background: #f8faff; }
+.alert-field-card-head { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #18315d; }
+.alert-version-pills { display: flex; flex-wrap: wrap; gap: 12px; }
+.alert-version-pills label { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border: 1px solid #dce6f5; border-radius: 7px; background: #f8faff; }
+.alert-version-pills input { accent-color: #0768ef; }
+.alert-snmp-page { display: grid; gap: 16px; }
+.alert-config-editor .alert-subpanel { border-top: 1px solid #e8eef6; }
 .alert-notice { padding: 11px 14px; border: 1px solid #b6e3d0; border-radius: 7px; background: #effaf5; color: #226746; }
 .alert-error { padding: 11px 14px; border: 1px solid #f0c7cd; border-radius: 7px; background: #fff3f4; color: #9a2736; }
 @media (max-width: 1050px) { .alert-kpis { grid-template-columns: repeat(3, minmax(130px, 1fr)); } }
-@media (max-width: 760px) { .alert-columns { grid-template-columns: minmax(0, 1fr); } .alert-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .alert-form { grid-template-columns: minmax(0, 1fr); } .alert-json, .alert-actions { grid-column: 1; } .alert-panel-head { align-items: flex-start; flex-direction: column; } .alert-toolbar { width: 100%; align-items: stretch; } .alert-toolbar input, .alert-toolbar select { width: 100%; } .alert-workspace .admin-page-head { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 760px) { .alert-columns { grid-template-columns: minmax(0, 1fr); } .alert-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .alert-form, .alert-field-card { grid-template-columns: minmax(0, 1fr); } .alert-json, .alert-actions, .alert-section-title, .alert-field-card-head { grid-column: 1; } .alert-panel-head { align-items: flex-start; flex-direction: column; } .alert-toolbar { width: 100%; align-items: stretch; } .alert-toolbar input, .alert-toolbar select { width: 100%; } .alert-workspace .admin-page-head { align-items: flex-start; flex-direction: column; } }
